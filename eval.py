@@ -1065,7 +1065,7 @@ def main():
 
         # Generate responses
         generation_kwargs = {
-            "max_new_tokens": 400,
+            "max_new_tokens": 1500,
             "temperature": args.temperature,
         }
         logger.info("Generating responses...")

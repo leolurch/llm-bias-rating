@@ -366,7 +366,7 @@ class Qwen25_3BAdapter(LLMAdapter):
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 150,
+        max_new_tokens: int = 1500,
         temperature: float = 0.7,
         do_sample: bool = True,
         top_p: float = 0.9,
@@ -536,7 +536,7 @@ class BloomzAdapter(LLMAdapter):
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 150,
+        max_new_tokens: int = 1500,
         temperature: float = 0.7,
         do_sample: bool = True,
         top_p: float = 0.9,

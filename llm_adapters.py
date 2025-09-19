@@ -559,10 +559,13 @@ class BloomzAdapter(LLMAdapter):
             inputs = self.tokenizer.encode(prompt, return_tensors="pt")
 
             # Move inputs to the correct device
+            # Handle device string conversion for tensor operations
+            target_device = self.actual_device if self.actual_device not in ["0", "1", "2", "3"] else f"cuda:{self.actual_device}"
+
             if isinstance(inputs, torch.Tensor):
-                inputs = inputs.to(self.actual_device)
+                inputs = inputs.to(target_device)
             else:
-                inputs = {k: v.to(self.actual_device) for k, v in inputs.items()}
+                inputs = {k: v.to(target_device) for k, v in inputs.items()}
 
             # Generate
             with torch.no_grad():

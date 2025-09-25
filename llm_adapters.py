@@ -636,6 +636,415 @@ class BloomzAdapter(LLMAdapter):
         logger.info("BLOOMZ model resources cleaned up")
 
 
+class Qwen3_14BAdapter(LLMAdapter):
+    """Adapter for Qwen3-14B model with thinking capabilities."""
+
+    def __init__(
+        self,
+        model_name: str = "Qwen/Qwen3-14B",
+        device: str = "auto",
+        enable_thinking: bool = False,
+    ):
+        """
+        Initialize the Qwen3-14B adapter.
+
+        Args:
+            model_name: HuggingFace model identifier
+            device: Device to load the model on ('auto', 'cuda', 'cpu', 'mps')
+            enable_thinking: Whether to enable thinking mode (default: False for efficiency)
+        """
+        self.model_name = model_name
+        self.device = self._get_device(device)
+        self.enable_thinking = enable_thinking
+        logger.info(
+            f"Loading Qwen3-14B model on {self.device} (thinking: {enable_thinking})"
+        )
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Set pad_token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Smart model loading optimized for large model
+        self.model, self.actual_device = self._load_model_optimally(model_name)
+        self.model.eval()
+        logger.info(f"Qwen3-14B model loaded successfully on {self.actual_device}")
+
+    def _get_device(self, device: str) -> str:
+        """Determine the appropriate device for model loading."""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return "mps"
+            else:
+                return "cpu"
+        return device
+
+    def _load_model_optimally(self, model_name: str):
+        """Load model with optimal strategy for available hardware."""
+        try:
+            if self.device == "cuda":
+                # Use device_map="auto" for multi-GPU or large model handling
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.bfloat16,  # Qwen3 uses BF16
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+                actual_device = self._get_actual_device(model)
+                logger.info(f"CUDA loading successful on {actual_device}")
+                return model, actual_device
+            elif self.device == "mps":
+                # MPS loading for Apple Silicon
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,  # MPS doesn't support bfloat16
+                    trust_remote_code=True,
+                )
+                model = model.to("mps")
+                logger.info("MPS loading successful")
+                return model, "mps"
+            else:
+                # CPU fallback
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name, torch_dtype=torch.float32, trust_remote_code=True
+                )
+                model = model.to("cpu")
+                logger.info("CPU loading successful")
+                return model, "cpu"
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Failed to load Qwen3-14B model: {e}")
+
+    def _get_actual_device(self, model):
+        """Determine the actual device where the model is loaded."""
+        try:
+            if hasattr(model, "hf_device_map") and model.hf_device_map:
+                first_device = list(model.hf_device_map.values())[0]
+                return str(first_device)
+            first_param = next(model.parameters())
+            return str(first_param.device)
+        except:
+            return "unknown"
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 1500,
+        temperature: float = 0.7,
+        do_sample: bool = True,
+        top_p: float = 0.8,
+        top_k: int = 20,
+        min_p: float = 0.0,
+        **kwargs,
+    ) -> str:
+        """
+        Generate text completion for the given prompt.
+
+        Args:
+            prompt: Input prompt string
+            max_new_tokens: Maximum number of new tokens to generate
+            temperature: Sampling temperature (0.7 for non-thinking, 0.6 for thinking)
+            do_sample: Whether to use sampling
+            top_p: Top-p sampling parameter (0.8 for non-thinking, 0.95 for thinking)
+            top_k: Top-k sampling parameter
+            min_p: Minimum probability threshold
+            **kwargs: Additional generation parameters
+
+        Returns:
+            Generated text completion
+        """
+        try:
+            # Prepare messages for chat template
+            messages = [{"role": "user", "content": prompt}]
+
+            # Apply chat template with thinking mode control
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=self.enable_thinking,
+            )
+
+            # Tokenize input
+            model_inputs = self.tokenizer([text], return_tensors="pt")
+
+            # Move inputs to the correct device
+            target_device = (
+                self.actual_device
+                if self.actual_device not in ["0", "1", "2", "3"]
+                else f"cuda:{self.actual_device}"
+            )
+
+            model_inputs = {k: v.to(target_device) for k, v in model_inputs.items()}
+
+            # Adjust parameters based on thinking mode
+            if self.enable_thinking:
+                # Thinking mode parameters from documentation
+                generation_temperature = 0.6
+                generation_top_p = 0.95
+            else:
+                # Non-thinking mode parameters from documentation
+                generation_temperature = temperature
+                generation_top_p = top_p
+
+            # Generate with appropriate parameters
+            with torch.no_grad():
+                generated_ids = self.model.generate(
+                    **model_inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=generation_temperature,
+                    do_sample=do_sample,
+                    top_p=generation_top_p,
+                    top_k=top_k,
+                    min_p=min_p,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    **kwargs,
+                )
+
+            # Extract only the new tokens
+            output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
+
+            if self.enable_thinking:
+                # Parse thinking content if in thinking mode
+                try:
+                    # Find the end of thinking content (</think> token: 151668)
+                    index = len(output_ids) - output_ids[::-1].index(151668)
+                except ValueError:
+                    index = 0
+
+                thinking_content = self.tokenizer.decode(
+                    output_ids[:index], skip_special_tokens=True
+                ).strip("\n")
+                content = self.tokenizer.decode(
+                    output_ids[index:], skip_special_tokens=True
+                ).strip("\n")
+
+                logger.debug(f"Thinking content: {thinking_content[:100]}...")
+                generated_text = content  # Return only the final response, not thinking
+            else:
+                # Non-thinking mode - return all generated content
+                generated_text = self.tokenizer.decode(
+                    output_ids, skip_special_tokens=True
+                ).strip()
+
+            if not generated_text or generated_text.strip() == "":
+                logger.warning(
+                    f"Qwen3-14B produced empty response for prompt: {prompt[:100]}..."
+                )
+                return "[Model produced empty response]"
+
+            return generated_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return f"Error: {str(e)}"
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return {
+            "model_name": self.model_name,
+            "model_type": "Qwen3-14B",
+            "parameters": "14.8B",
+            "context_length": 32768,
+            "device": self.actual_device,
+            "architecture": "Qwen3 with thinking capabilities",
+            "thinking_mode": self.enable_thinking,
+        }
+
+    def cleanup(self):
+        """Clean up model resources."""
+        if hasattr(self, "model"):
+            del self.model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        logger.info("Qwen3-14B model resources cleaned up")
+
+
+class GPTNeoX20BAdapter(LLMAdapter):
+    """Adapter for EleutherAI GPT-NeoX-20B model."""
+
+    def __init__(
+        self,
+        model_name: str = "EleutherAI/gpt-neox-20b",
+        device: str = "auto",
+    ):
+        """
+        Initialize the GPT-NeoX-20B adapter.
+
+        Args:
+            model_name: HuggingFace model identifier
+            device: Device to load the model on ('auto', 'cuda', 'cpu', 'mps')
+        """
+        self.model_name = model_name
+        self.device = self._get_device(device)
+        logger.info(f"Loading GPT-NeoX-20B model on {self.device}")
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Set pad_token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Smart model loading optimized for large model
+        self.model, self.actual_device = self._load_model_optimally(model_name)
+        self.model.eval()
+        logger.info(f"GPT-NeoX-20B model loaded successfully on {self.actual_device}")
+
+    def _get_device(self, device: str) -> str:
+        """Determine the appropriate device for model loading."""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return "mps"
+            else:
+                return "cpu"
+        return device
+
+    def _load_model_optimally(self, model_name: str):
+        """Load model with optimal strategy for available hardware."""
+        try:
+            if self.device == "cuda":
+                # Use device_map="auto" for multi-GPU or large model handling
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+                actual_device = self._get_actual_device(model)
+                logger.info(f"CUDA loading successful on {actual_device}")
+                return model, actual_device
+            elif self.device == "mps":
+                # MPS loading for Apple Silicon
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                )
+                model = model.to("mps")
+                logger.info("MPS loading successful")
+                return model, "mps"
+            else:
+                # CPU fallback
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name, torch_dtype=torch.float32, trust_remote_code=True
+                )
+                model = model.to("cpu")
+                logger.info("CPU loading successful")
+                return model, "cpu"
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Failed to load GPT-NeoX-20B model: {e}")
+
+    def _get_actual_device(self, model):
+        """Determine the actual device where the model is loaded."""
+        try:
+            if hasattr(model, "hf_device_map") and model.hf_device_map:
+                first_device = list(model.hf_device_map.values())[0]
+                return str(first_device)
+            first_param = next(model.parameters())
+            return str(first_param.device)
+        except:
+            return "unknown"
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 1500,
+        temperature: float = 0.7,
+        do_sample: bool = True,
+        top_p: float = 0.9,
+        top_k: int = 40,
+        **kwargs,
+    ) -> str:
+        """
+        Generate text completion for the given prompt.
+
+        Args:
+            prompt: Input prompt string
+            max_new_tokens: Maximum number of new tokens to generate
+            temperature: Sampling temperature
+            do_sample: Whether to use sampling
+            top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter
+            **kwargs: Additional generation parameters
+
+        Returns:
+            Generated text completion
+        """
+        try:
+            # Tokenize input
+            inputs = self.tokenizer(prompt, return_tensors="pt")
+
+            # Move inputs to the correct device
+            target_device = (
+                self.actual_device
+                if self.actual_device not in ["0", "1", "2", "3"]
+                else f"cuda:{self.actual_device}"
+            )
+
+            inputs = {k: v.to(target_device) for k, v in inputs.items()}
+
+            # Generate with specified parameters
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=do_sample,
+                    top_p=top_p,
+                    top_k=top_k,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    **kwargs,
+                )
+
+            # Extract only the new tokens
+            input_length = inputs["input_ids"].shape[-1]
+            new_tokens = outputs[0][input_length:]
+            generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            if not generated_text or generated_text.strip() == "":
+                logger.warning(
+                    f"GPT-NeoX-20B produced empty response for prompt: {prompt[:100]}..."
+                )
+                return "[Model produced empty response]"
+
+            return generated_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return f"Error: {str(e)}"
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return {
+            "model_name": self.model_name,
+            "model_type": "GPT-NeoX-20B",
+            "parameters": "20B",
+            "context_length": 2048,
+            "device": self.actual_device,
+            "architecture": "GPT-NeoX with rotary positional embeddings",
+        }
+
+    def cleanup(self):
+        """Clean up model resources."""
+        if hasattr(self, "model"):
+            del self.model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        logger.info("GPT-NeoX-20B model resources cleaned up")
+
+
 class DummyLLMAdapter(LLMAdapter):
     """Dummy LLM adapter for testing purposes."""
 

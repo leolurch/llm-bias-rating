@@ -19,6 +19,8 @@ from llm_adapters import (
     OpenAIAdapter,
     GrokAdapter,
     Qwen25_3BAdapter,
+    Qwen3_14BAdapter,
+    GPTNeoX20BAdapter,
     BloomzAdapter,
     DummyLLMAdapter,
 )
@@ -1027,6 +1029,10 @@ def create_model_adapter(model_type: str, **kwargs) -> LLMAdapter:
         return Qwen25_7BAdapter(**kwargs)
     elif model_type == "qwen25-3b":
         return Qwen25_3BAdapter(**kwargs)
+    elif model_type == "qwen3-14b":
+        return Qwen3_14BAdapter(**kwargs)
+    elif model_type == "gpt-neox-20b":
+        return GPTNeoX20BAdapter(**kwargs)
     elif model_type == "bloomz":
         return BloomzAdapter(**kwargs)
     elif model_type == "dummy":
@@ -1095,6 +1101,8 @@ def main():
             "qwen25-14b",
             "qwen25-7b",
             "qwen25-3b",
+            "qwen3-14b",
+            "gpt-neox-20b",
             "bloomz",
             "dummy",
         ],

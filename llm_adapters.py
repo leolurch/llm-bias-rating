@@ -22,6 +22,7 @@ except ImportError:
 try:
     from xai_sdk import Client
     from xai_sdk.chat import user, system
+
     XAI_AVAILABLE = True
 except ImportError:
     XAI_AVAILABLE = False
@@ -118,8 +119,8 @@ class OpenAIAdapter(LLMAdapter):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=400,
-                temperature=0.7
+                max_tokens=1500,
+                temperature=0.7,
             )
 
             # Extract content from response
@@ -451,6 +452,7 @@ class Qwen25_3BAdapter(LLMAdapter):
 
 class BloomzAdapter(LLMAdapter):
     """Adapter for BigScience BLOOMZ-7B1 model."""
+
     def __init__(self, model_name: str = "bigscience/bloomz-7b1", device: str = "auto"):
         """
         Initialize the BLOOMZ-7B1 adapter.
@@ -493,7 +495,7 @@ class BloomzAdapter(LLMAdapter):
                     model_name,
                     torch_dtype=torch.float16,
                     device_map="auto",
-                    trust_remote_code=True
+                    trust_remote_code=True,
                 )
                 actual_device = self._get_actual_device(model)
                 logger.info(f"CUDA loading successful on {actual_device}")
@@ -501,9 +503,7 @@ class BloomzAdapter(LLMAdapter):
             elif self.device == "mps":
                 # MPS loading for Apple Silicon
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float16,
-                    trust_remote_code=True
+                    model_name, torch_dtype=torch.float16, trust_remote_code=True
                 )
                 model = model.to("mps")
                 logger.info("MPS loading successful")
@@ -511,9 +511,7 @@ class BloomzAdapter(LLMAdapter):
             else:
                 # CPU fallback
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float32,
-                    trust_remote_code=True
+                    model_name, torch_dtype=torch.float32, trust_remote_code=True
                 )
                 model = model.to("cpu")
                 logger.info("CPU loading successful")
@@ -540,6 +538,8 @@ class BloomzAdapter(LLMAdapter):
         temperature: float = 0.7,
         do_sample: bool = True,
         top_p: float = 0.9,
+        retry_count=0,
+        max_retries=3,
         **kwargs,
     ) -> str:
         """
@@ -554,13 +554,18 @@ class BloomzAdapter(LLMAdapter):
         Returns:
             Generated text completion
         """
+
         try:
             # Tokenize input
             inputs = self.tokenizer.encode(prompt, return_tensors="pt")
 
             # Move inputs to the correct device
             # Handle device string conversion for tensor operations
-            target_device = self.actual_device if self.actual_device not in ["0", "1", "2", "3"] else f"cuda:{self.actual_device}"
+            target_device = (
+                self.actual_device
+                if self.actual_device not in ["0", "1", "2", "3"]
+                else f"cuda:{self.actual_device}"
+            )
 
             if isinstance(inputs, torch.Tensor):
                 inputs = inputs.to(target_device)
@@ -573,8 +578,6 @@ class BloomzAdapter(LLMAdapter):
                     inputs,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
-                    do_sample=do_sample,
-                    top_p=top_p,
                     pad_token_id=self.tokenizer.eos_token_id,
                     **kwargs,
                 )
@@ -588,7 +591,26 @@ class BloomzAdapter(LLMAdapter):
             new_tokens = outputs[0][input_length:]
             generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-            return generated_text.strip()
+            stripped = generated_text.strip()
+
+            if stripped == "":
+                if retry_count == max_retries:
+                    logger.error(f"Failted to generate text for prompt:\n{prompt}")
+                    return ""
+                else:
+                    logger.info(f"Retrying generation for prompt:\n{prompt}")
+                    return self.generate(
+                        prompt=prompt,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        do_sample=do_sample,
+                        top_p=top_p,
+                        retry_count=retry_count + 1,
+                        max_retries=max_retries,
+                    )
+            logger.info(f"Generated text: {stripped}")
+
+            return stripped
 
         except Exception as e:
             logger.error(f"Error during generation: {e}")
@@ -607,7 +629,7 @@ class BloomzAdapter(LLMAdapter):
 
     def cleanup(self):
         """Clean up model resources."""
-        if hasattr(self, 'model'):
+        if hasattr(self, "model"):
             del self.model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

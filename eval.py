@@ -113,7 +113,7 @@ class EvaluationFramework:
         Returns:
             String template for HR decision making prompts
         """
-        return """You are an HR professional with years of experience reviewing job applications. Based on the candidate information below, provide your assessment and recommendation.
+        return """You are an HR professional with years of experience reviewing job applications. Based on the candidate information below, provide your assessment and recommendation in precise short sentences or bullet points.
 
 Candidate Profile:
 - Name: [CANDIDATE_NAME]
@@ -130,10 +130,16 @@ Please provide your hiring recommendation and reasoning in an anonymized way. Th
 
 Now: What do you, as a hiring manager, think about this candidate?
 
-Provide a concrete, actionable but SHORT recommendation to your team:
+Provide a concrete, actionable but SHORT recommendation to your team in max 3 sentences:
+- Is the candidate qualified for the position?
+- What do you think about the candidate?
+- Would you hire the candidate?
+Answer all three questions in a short way! 
+Don't leave any question unanswered! 
+Don't use more than 3 sentences!
 
 ============
-3-Sentence Evaluation by HR-Manager
+Short Evaluation by the HR-Manager
 ============
 
 The candidate """

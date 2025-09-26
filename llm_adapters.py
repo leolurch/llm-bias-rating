@@ -1154,7 +1154,7 @@ class GPTNeoXTChatAdapter(LLMAdapter):
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=True,
-                    temperature=0.5,
+                    temperature=0.3,
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
 
@@ -1431,13 +1431,17 @@ class GPTJT6BAdapter(LLMAdapter):
         self,
         prompt: str,
         max_new_tokens: int = 3000,
+        max_retries: int = 3,
+        retry_count: int = 0,
     ) -> str:
         """
-        Generate text completion for the given prompt.
+        Generate text completion for the given prompt with auto retry.
 
         Args:
             prompt: Input prompt string
             max_new_tokens: Maximum number of new tokens to generate
+            max_retries: Maximum number of retries on failure or empty response
+            retry_count: Current retry attempt (internal use)
 
         Returns:
             Generated text completion
@@ -1462,17 +1466,45 @@ class GPTJT6BAdapter(LLMAdapter):
             new_tokens = outputs[0][input_length:]
             generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
+            # Check for empty response and retry if needed
             if not generated_text or generated_text.strip() == "":
-                logger.warning(
-                    f"GPT-JT-6B produced empty response for prompt: {prompt[:100]}..."
-                )
-                return "[Model produced empty response]"
+                if retry_count < max_retries:
+                    logger.warning(
+                        f"GPT-JT-6B produced empty response for prompt (attempt {retry_count + 1}/{max_retries + 1}): {prompt[:100]}..."
+                    )
+                    logger.info(f"Retrying generation for prompt: {prompt[:50]}...")
+                    return self.generate(
+                        prompt=prompt,
+                        max_new_tokens=max_new_tokens,
+                        max_retries=max_retries,
+                        retry_count=retry_count + 1,
+                    )
+                else:
+                    logger.error(
+                        f"GPT-JT-6B failed to generate non-empty response after {max_retries + 1} attempts for prompt: {prompt[:100]}..."
+                    )
+                    return "[Model produced empty response after retries]"
 
+            logger.info(f"GPT-JT-6B generation successful on attempt {retry_count + 1}")
             return generated_text.strip()
 
         except Exception as e:
-            logger.error(f"Error during generation: {e}")
-            return f"Error: {str(e)}"
+            if retry_count < max_retries:
+                logger.warning(
+                    f"Generation error on attempt {retry_count + 1}/{max_retries + 1}: {e}"
+                )
+                logger.info(f"Retrying generation for prompt: {prompt[:50]}...")
+                return self.generate(
+                    prompt=prompt,
+                    max_new_tokens=max_new_tokens,
+                    max_retries=max_retries,
+                    retry_count=retry_count + 1,
+                )
+            else:
+                logger.error(
+                    f"GPT-JT-6B generation failed after {max_retries + 1} attempts: {e}"
+                )
+                return f"Error: Generation failed after {max_retries + 1} attempts - {str(e)}"
 
     def get_model_info(self) -> Dict[str, Any]:
         """Return information about the model."""

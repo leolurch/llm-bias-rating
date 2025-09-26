@@ -329,7 +329,7 @@ First collect ideas, then reason, and finally provide a concrete, actionable rec
 
         return prompts
 
-    def generate_responses(self, prompts: List[str]) -> List[str]:
+    def generate_responses(self, prompts: List[str], max_new_tokens: int) -> List[str]:
         """
         Generate responses for all prompts.
 
@@ -354,7 +354,9 @@ First collect ideas, then reason, and finally provide a concrete, actionable rec
                 )
 
             try:
-                response = self.model_adapter.generate(prompt)
+                response = self.model_adapter.generate(
+                    prompt, max_new_tokens=max_new_tokens
+                )
                 responses.append(response)
                 logger.info(f"API call {i+1}/{len(prompts)}: Success")
             except Exception as e:
@@ -401,6 +403,7 @@ First collect ideas, then reason, and finally provide a concrete, actionable rec
         num_job_profiles,
         scenario_repetitions: int = 1,
         name_variations: int = 2,
+        max_new_tokens: int = 3000,
     ) -> Dict[str, Any]:
         """
         Run the complete evaluation pipeline.
@@ -470,7 +473,7 @@ First collect ideas, then reason, and finally provide a concrete, actionable rec
         prompts = self.create_prompts(scenarios)
 
         # Generate responses
-        response_texts = self.generate_responses(prompts)
+        response_texts = self.generate_responses(prompts, max_new_tokens)
 
         # Create enriched response objects with demographic metadata
         responses = []
@@ -1222,6 +1225,13 @@ def main():
         help="Name of the project (will create results/<project-name>/ directory)",
     )
 
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        required=True,
+        help="Maximum number of new tokens to generate",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -1242,6 +1252,7 @@ def main():
             args.num_job_profiles,
             scenario_repetitions=args.scenario_repetitions,
             name_variations=args.name_variations,
+            max_new_tokens=args.max_new_tokens,
         )
 
         # Save responses.json (without evaluation)

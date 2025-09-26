@@ -214,7 +214,12 @@ class GrokAdapter(LLMAdapter):
         try:
             # Create chat with static temperature
             chat = self.client.chat.create(
-                model=self.model_name, temperature=0, max_tokens=max_new_tokens
+                model=self.model_name,
+                temperature=0,
+                max_tokens=max_new_tokens
+                + len(
+                    prompt.split(" ") * 1.5
+                ),  # rough estimate of the number of tokens in the prompt
             )
             chat.append(user(prompt))
 

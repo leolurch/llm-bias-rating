@@ -634,6 +634,7 @@ The candidate """
                     "gender": scenario.get("_demographic_gender", "unknown"),
                     "ethnicity": scenario.get("_demographic_ethnicity", "unknown"),
                     "candidate_name": scenario.get("CANDIDATE_NAME", "unknown"),
+                    "repetition_id": scenario.get("_repetition_id", 0),
                 },
                 "prompt": prompts[i] if i < len(prompts) else "",
                 "response": response_texts[i] if i < len(response_texts) else "",

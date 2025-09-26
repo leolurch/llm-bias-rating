@@ -742,7 +742,7 @@ class Qwen3_14BAdapter(LLMAdapter):
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 1500,
+        max_new_tokens: int = 3000,
     ) -> str:
         """
         Generate text completion for the given prompt.
@@ -959,7 +959,7 @@ class GPTNeoX20BAdapter(LLMAdapter):
     def generate(
         self,
         prompt: str,
-        max_new_tokens: int = 1500,
+        max_new_tokens: int = 3000,
         **kwargs,
     ) -> str:
         """

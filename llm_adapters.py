@@ -1063,8 +1063,17 @@ class GPTNeoXTChatAdapter(LLMAdapter):
             model_name: HuggingFace model identifier
             device: CUDA device to load the model on (GPU only)
         """
-        if not device.startswith('cuda'):
-            raise ValueError("GPT-NeoXT-Chat adapter only supports CUDA devices. Use 'cuda:0', 'cuda:1', etc.")
+        # Handle auto device selection - prefer CUDA but allow fallback
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda:0"
+                logger.info("Auto-selected cuda:0 for GPT-NeoXT-Chat adapter")
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+                logger.warning("CUDA not available, using MPS for GPT-NeoXT-Chat adapter (may be slower)")
+            else:
+                device = "cpu"
+                logger.warning("CUDA/MPS not available, using CPU for GPT-NeoXT-Chat adapter (will be slow)")
             
         self.model_name = model_name
         self.device = device
@@ -1077,14 +1086,30 @@ class GPTNeoXTChatAdapter(LLMAdapter):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Load model on GPU only
+        # Load model with device-appropriate settings
         try:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16,
-                trust_remote_code=True,
-            )
-            self.model = self.model.to(device)
+            if device.startswith('cuda'):
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                )
+                self.model = self.model.to(device)
+            elif device == 'mps':
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                )
+                self.model = self.model.to('mps')
+            else:  # CPU
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float32,  # CPU needs float32
+                    trust_remote_code=True,
+                )
+                self.model = self.model.to('cpu')
+            
             self.model.eval()
             logger.info(f"GPT-NeoXT-Chat-Base-20B model loaded successfully on {self.device}")
         except Exception as e:

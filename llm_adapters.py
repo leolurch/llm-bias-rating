@@ -1070,48 +1070,56 @@ class GPTNeoXTChatAdapter(LLMAdapter):
                 logger.info("Auto-selected cuda:0 for GPT-NeoXT-Chat adapter")
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 device = "mps"
-                logger.warning("CUDA not available, using MPS for GPT-NeoXT-Chat adapter (may be slower)")
+                logger.warning(
+                    "CUDA not available, using MPS for GPT-NeoXT-Chat adapter (may be slower)"
+                )
             else:
                 device = "cpu"
-                logger.warning("CUDA/MPS not available, using CPU for GPT-NeoXT-Chat adapter (will be slow)")
-            
+                logger.warning(
+                    "CUDA/MPS not available, using CPU for GPT-NeoXT-Chat adapter (will be slow)"
+                )
+
         self.model_name = model_name
         self.device = device
-        logger.info(f"Loading GPT-NeoXT-Chat-Base-20B model on {self.device} (GPU only)")
+        logger.info(
+            f"Loading GPT-NeoXT-Chat-Base-20B model on {self.device} (GPU only)"
+        )
 
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
+
         # Set pad_token if not present
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         # Load model with device-appropriate settings
         try:
-            if device.startswith('cuda'):
+            if device.startswith("cuda"):
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     torch_dtype=torch.float16,
                     trust_remote_code=True,
                 )
                 self.model = self.model.to(device)
-            elif device == 'mps':
+            elif device == "mps":
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     torch_dtype=torch.float16,
                     trust_remote_code=True,
                 )
-                self.model = self.model.to('mps')
+                self.model = self.model.to("mps")
             else:  # CPU
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     torch_dtype=torch.float32,  # CPU needs float32
                     trust_remote_code=True,
                 )
-                self.model = self.model.to('cpu')
-            
+                self.model = self.model.to("cpu")
+
             self.model.eval()
-            logger.info(f"GPT-NeoXT-Chat-Base-20B model loaded successfully on {self.device}")
+            logger.info(
+                f"GPT-NeoXT-Chat-Base-20B model loaded successfully on {self.device}"
+            )
         except Exception as e:
             logger.error(f"Model loading failed: {e}")
             raise RuntimeError(f"Failed to load GPT-NeoXT-Chat model: {e}")
@@ -1134,9 +1142,11 @@ class GPTNeoXTChatAdapter(LLMAdapter):
         try:
             # Format prompt in the expected chat format
             formatted_prompt = f"<human>: {prompt}\n<bot>:"
-            
+
             # Tokenize input
-            inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.model.device)
+            inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(
+                self.model.device
+            )
 
             # Generate with specified parameters
             with torch.no_grad():
@@ -1144,13 +1154,13 @@ class GPTNeoXTChatAdapter(LLMAdapter):
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=True,
-                    temperature=0.8,
+                    temperature=0.5,
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
 
             # Decode the full output
             full_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
+
             # Extract only the bot's response (everything after "<bot>:")
             if "<bot>:" in full_output:
                 generated_text = full_output.split("<bot>:", 1)[1].strip()
@@ -1158,7 +1168,9 @@ class GPTNeoXTChatAdapter(LLMAdapter):
                 # Fallback: extract new tokens only
                 input_length = inputs["input_ids"].shape[-1]
                 new_tokens = outputs[0][input_length:]
-                generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+                generated_text = self.tokenizer.decode(
+                    new_tokens, skip_special_tokens=True
+                )
 
             if not generated_text or generated_text.strip() == "":
                 logger.warning(
@@ -1221,7 +1233,9 @@ class KoboldAIFairseq13BAdapter(LLMAdapter):
         # Smart model loading optimized for large model
         self.model, self.actual_device = self._load_model_optimally(model_name)
         self.model.eval()
-        logger.info(f"KoboldAI/fairseq-dense-13B model loaded successfully on {self.actual_device}")
+        logger.info(
+            f"KoboldAI/fairseq-dense-13B model loaded successfully on {self.actual_device}"
+        )
 
     def _get_device(self, device: str) -> str:
         """Determine the appropriate device for model loading."""
@@ -1380,17 +1394,21 @@ class GPTJT6BAdapter(LLMAdapter):
                 device = "cuda:0"
                 logger.info("Auto-selected cuda:0 for GPT-JT-6B adapter")
             else:
-                raise ValueError("GPT-JT-6B adapter requires CUDA, but CUDA is not available. Please use a CUDA-enabled machine.")
-        elif not device.startswith('cuda'):
-            raise ValueError("GPT-JT-6B adapter only supports CUDA devices. Use 'cuda:0', 'cuda:1', etc.")
-            
+                raise ValueError(
+                    "GPT-JT-6B adapter requires CUDA, but CUDA is not available. Please use a CUDA-enabled machine."
+                )
+        elif not device.startswith("cuda"):
+            raise ValueError(
+                "GPT-JT-6B adapter only supports CUDA devices. Use 'cuda:0', 'cuda:1', etc."
+            )
+
         self.model_name = model_name
         self.device = device
         logger.info(f"Loading GPT-JT-6B-v1 model on {self.device}")
 
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
+
         # Set pad_token if not present
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token

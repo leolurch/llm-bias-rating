@@ -749,6 +749,7 @@ class Qwen3_14BAdapter(LLMAdapter):
         self,
         prompt: str,
         max_new_tokens: int = 3000,
+        **kwargs,
     ) -> str:
         """
         Generate text completion for the given prompt.
@@ -1045,6 +1046,292 @@ class GPTNeoX20BAdapter(LLMAdapter):
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         logger.info("GPT-NeoX-20B model resources cleaned up")
+
+
+class GPTNeoXTChatAdapter(LLMAdapter):
+    """Adapter for togethercomputer/GPT-NeoXT-Chat-Base-20B model (GPU only)."""
+
+    def __init__(
+        self,
+        model_name: str = "togethercomputer/GPT-NeoXT-Chat-Base-20B",
+        device: str = "cuda:0",
+    ):
+        """
+        Initialize the GPT-NeoXT-Chat-Base-20B adapter.
+
+        Args:
+            model_name: HuggingFace model identifier
+            device: CUDA device to load the model on (GPU only)
+        """
+        if not device.startswith('cuda'):
+            raise ValueError("GPT-NeoXT-Chat adapter only supports CUDA devices. Use 'cuda:0', 'cuda:1', etc.")
+            
+        self.model_name = model_name
+        self.device = device
+        logger.info(f"Loading GPT-NeoXT-Chat-Base-20B model on {self.device} (GPU only)")
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Set pad_token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Load model on GPU only
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                trust_remote_code=True,
+            )
+            self.model = self.model.to(device)
+            self.model.eval()
+            logger.info(f"GPT-NeoXT-Chat-Base-20B model loaded successfully on {self.device}")
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Failed to load GPT-NeoXT-Chat model: {e}")
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 3000,
+    ) -> str:
+        """
+        Generate text completion for the given prompt using chat format.
+
+        Args:
+            prompt: Input prompt string
+            max_new_tokens: Maximum number of new tokens to generate
+
+        Returns:
+            Generated text completion
+        """
+        try:
+            # Format prompt in the expected chat format
+            formatted_prompt = f"<human>: {prompt}\n<bot>:"
+            
+            # Tokenize input
+            inputs = self.tokenizer(formatted_prompt, return_tensors="pt").to(self.model.device)
+
+            # Generate with specified parameters
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=True,
+                    temperature=0.8,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
+
+            # Decode the full output
+            full_output = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract only the bot's response (everything after "<bot>:")
+            if "<bot>:" in full_output:
+                generated_text = full_output.split("<bot>:", 1)[1].strip()
+            else:
+                # Fallback: extract new tokens only
+                input_length = inputs["input_ids"].shape[-1]
+                new_tokens = outputs[0][input_length:]
+                generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            if not generated_text or generated_text.strip() == "":
+                logger.warning(
+                    f"GPT-NeoXT-Chat produced empty response for prompt: {prompt[:100]}..."
+                )
+                return "[Model produced empty response]"
+
+            return generated_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return f"Error: {str(e)}"
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return {
+            "model_name": self.model_name,
+            "model_type": "GPT-NeoXT-Chat-Base-20B",
+            "parameters": "20B",
+            "context_length": 2048,
+            "device": self.device,
+            "architecture": "GPT-NeoX with chat fine-tuning",
+        }
+
+    def cleanup(self):
+        """Clean up model resources."""
+        if hasattr(self, "model"):
+            del self.model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("GPT-NeoXT-Chat model resources cleaned up")
+
+
+class KoboldAIFairseq13BAdapter(LLMAdapter):
+    """Adapter for KoboldAI/fairseq-dense-13B model."""
+
+    def __init__(
+        self,
+        model_name: str = "KoboldAI/fairseq-dense-13B",
+        device: str = "auto",
+    ):
+        """
+        Initialize the KoboldAI/fairseq-dense-13B adapter.
+
+        Args:
+            model_name: HuggingFace model identifier
+            device: Device to load the model on ('auto', 'cuda', 'cpu', 'mps')
+        """
+        self.model_name = model_name
+        self.device = self._get_device(device)
+        logger.info(f"Loading KoboldAI/fairseq-dense-13B model on {self.device}")
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Set pad_token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Smart model loading optimized for large model
+        self.model, self.actual_device = self._load_model_optimally(model_name)
+        self.model.eval()
+        logger.info(f"KoboldAI/fairseq-dense-13B model loaded successfully on {self.actual_device}")
+
+    def _get_device(self, device: str) -> str:
+        """Determine the appropriate device for model loading."""
+        if device == "auto":
+            if torch.cuda.is_available():
+                return "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                return "mps"
+            else:
+                return "cpu"
+        return device
+
+    def _load_model_optimally(self, model_name: str):
+        """Load model with optimal strategy for available hardware."""
+        try:
+            if self.device == "cuda":
+                # Use device_map="auto" for multi-GPU or large model handling
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+                actual_device = self._get_actual_device(model)
+                logger.info(f"CUDA loading successful on {actual_device}")
+                return model, actual_device
+            elif self.device == "mps":
+                # MPS loading for Apple Silicon
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                )
+                model = model.to("mps")
+                logger.info("MPS loading successful")
+                return model, "mps"
+            else:
+                # CPU fallback
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name, torch_dtype=torch.float32, trust_remote_code=True
+                )
+                model = model.to("cpu")
+                logger.info("CPU loading successful")
+                return model, "cpu"
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Failed to load KoboldAI/fairseq-dense-13B model: {e}")
+
+    def _get_actual_device(self, model):
+        """Determine the actual device where the model is loaded."""
+        try:
+            if hasattr(model, "hf_device_map") and model.hf_device_map:
+                first_device = list(model.hf_device_map.values())[0]
+                return str(first_device)
+            first_param = next(model.parameters())
+            return str(first_param.device)
+        except:
+            return "unknown"
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 3000,
+    ) -> str:
+        """
+        Generate text completion for the given prompt.
+
+        Args:
+            prompt: Input prompt string
+            max_new_tokens: Maximum number of new tokens to generate
+
+        Returns:
+            Generated text completion
+        """
+        try:
+            # Tokenize input
+            inputs = self.tokenizer(prompt, return_tensors="pt")
+
+            # Move inputs to the correct device
+            target_device = (
+                self.actual_device
+                if self.actual_device not in ["0", "1", "2", "3"]
+                else f"cuda:{self.actual_device}"
+            )
+
+            inputs = {k: v.to(target_device) for k, v in inputs.items()}
+
+            # Generate with specified parameters
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=0.7,
+                    do_sample=True,
+                    top_p=0.9,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
+
+            # Extract only the new tokens
+            input_length = inputs["input_ids"].shape[-1]
+            new_tokens = outputs[0][input_length:]
+            generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            if not generated_text or generated_text.strip() == "":
+                logger.warning(
+                    f"KoboldAI/fairseq-dense-13B produced empty response for prompt: {prompt[:100]}..."
+                )
+                return "[Model produced empty response]"
+
+            return generated_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return f"Error: {str(e)}"
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return {
+            "model_name": self.model_name,
+            "model_type": "KoboldAI-fairseq-dense-13B",
+            "parameters": "13B",
+            "context_length": 2048,
+            "device": self.actual_device,
+            "architecture": "Fairseq dense transformer",
+        }
+
+    def cleanup(self):
+        """Clean up model resources."""
+        if hasattr(self, "model"):
+            del self.model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        logger.info("KoboldAI/fairseq-dense-13B model resources cleaned up")
 
 
 class DummyLLMAdapter(LLMAdapter):

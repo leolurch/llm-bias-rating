@@ -24,7 +24,7 @@ SURNAMES = {
     "hispanic": ["BARRAJAS", "ZAVALA", "VELAZQUEZ", "AVALOS", "OROZCO", "VAZQUEZ", "JUAREZ", "MEZA", "HUERTA", "IBARRA"],
 }
 
-# Mapping from NYC dataset ethnicity categories to our race categories
+# Mapping from NYC dataset ethnicity categories to our ethnicity categories
 ETHNICITY_MAPPING = {
     "WHITE NON HISPANIC": "white",
     "WHITE NON HISP": "white",  # Truncated version in some years
@@ -65,18 +65,18 @@ def load_and_deduplicate_names(csv_path: Path) -> dict:
                 continue
             seen_rows.add(row_tuple)
 
-            # Map ethnicity to our race categories
+            # Map ethnicity to our ethnicity categories
             ethnicity = row['Ethnicity'].strip()
             if ethnicity not in ETHNICITY_MAPPING:
                 continue
 
-            race = ETHNICITY_MAPPING[ethnicity]
+            ethnicity_category = ETHNICITY_MAPPING[ethnicity]
             gender = row['Gender'].lower()
             name = row["Child's First Name"].strip()
             count = int(row['Count'])
 
             # Accumulate counts across all years for this name
-            names_by_demo[race][gender][name] += count
+            names_by_demo[ethnicity_category][gender][name] += count
 
     logger.info(f"Processed {total_rows} total rows, removed {duplicate_rows} duplicates")
 
@@ -88,13 +88,13 @@ def create_full_names(names_by_demo: dict) -> dict:
 
     result = {}
 
-    for race, genders in names_by_demo.items():
-        if race not in SURNAMES:
-            logger.warning(f"No surnames defined for race: {race}")
+    for ethnicity_category, genders in names_by_demo.items():
+        if ethnicity_category not in SURNAMES:
+            logger.warning(f"No surnames defined for ethnicity: {ethnicity_category}")
             continue
 
-        result[race] = {}
-        race_surnames = SURNAMES[race]
+        result[ethnicity_category] = {}
+        ethnicity_surnames = SURNAMES[ethnicity_category]
 
         for gender, names in genders.items():
             # Sort by total count and take top names
@@ -103,12 +103,12 @@ def create_full_names(names_by_demo: dict) -> dict:
             # Create all combinations of first names with all surnames
             full_names = []
             for first_name, _ in sorted_names:
-                for surname in race_surnames:
+                for surname in ethnicity_surnames:
                     full_name = f"{first_name.upper()} {surname.upper()}"
                     full_names.append(full_name)
 
-            result[race][gender] = full_names
-            logger.info(f"Created {len(full_names)} full names for {race} {gender}")
+            result[ethnicity_category][gender] = full_names
+            logger.info(f"Created {len(full_names)} full names for {ethnicity_category} {gender}")
 
     return result
 
@@ -142,7 +142,7 @@ def generate_names_file():
                 'surname_url': 'https://www2.census.gov/topics/genealogy/2010surnames/',
                 'generated_by': 'generate_names.py',
                 'description': 'First names from NYC baby names data combined with demographically appropriate surnames from U.S. Census data',
-                'races': list(full_names.keys()),
+                'ethnicities': list(full_names.keys()),
                 'surname_categories': {
                     'white': 'Non-Hispanic White alone',
                     'black': 'Non-Hispanic Black or African American alone',
@@ -161,11 +161,11 @@ def generate_names_file():
 
         # Print summary statistics
         total_names = 0
-        for race, genders in full_names.items():
+        for ethnicity_category, genders in full_names.items():
             for gender, names in genders.items():
                 count = len(names)
                 total_names += count
-                logger.info(f"  {race} {gender}: {count} names")
+                logger.info(f"  {ethnicity_category} {gender}: {count} names")
 
         logger.info(f"Total names: {total_names}")
         return True

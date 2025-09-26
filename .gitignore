@@ -4,4 +4,5 @@ results/
 .env
 offload_cache/
 data
-.
+.DS_Store
+backup

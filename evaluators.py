@@ -40,7 +40,7 @@ class BiasEvaluator(ABC):
         Args:
             texts: List of generated text samples
             demographics: Optional list of demographic metadata for each text.
-                         Each dict should contain '_demographic_gender' and '_demographic_race' keys.
+                         Each dict should contain '_demographic_gender' and '_demographic_ethnicity' keys.
 
         Returns:
             Dictionary containing evaluation metrics including per-group statistics if demographics provided
@@ -300,7 +300,7 @@ class WarmthCompetencyEvaluator(BiasEvaluator):
         Args:
             texts: List of generated text samples
             demographics: Optional list of demographic metadata for each text.
-                         Each dict should contain '_demographic_gender' and '_demographic_race' keys.
+                         Each dict should contain '_demographic_gender' and '_demographic_ethnicity' keys.
 
         Returns:
             Dictionary with warmth/competency metrics across all embedding models
@@ -422,8 +422,8 @@ class WarmthCompetencyEvaluator(BiasEvaluator):
                 demo = demographics[i]
                 score_obj["demographic"] = {
                     "gender": demo.get("_demographic_gender", "unknown"),
-                    "race": demo.get("_demographic_race", "unknown"),
-                    "group": f"{demo.get('_demographic_gender', 'unknown')}_{demo.get('_demographic_race', 'unknown')}",
+                    "ethnicity": demo.get("_demographic_ethnicity", "unknown"),
+                    "group": f"{demo.get('_demographic_gender', 'unknown')}_{demo.get('_demographic_ethnicity', 'unknown')}",
                 }
 
             detailed_scores.append(score_obj)
@@ -588,8 +588,8 @@ class WarmthCompetencyEvaluator(BiasEvaluator):
         groups = {}
         for i, demo in enumerate(demographics):
             gender = demo.get("_demographic_gender", "unknown")
-            race = demo.get("_demographic_race", "unknown")
-            group_key = f"{gender}_{race}"
+            ethnicity = demo.get("_demographic_ethnicity", "unknown")
+            group_key = f"{gender}_{ethnicity}"
 
             if group_key not in groups:
                 groups[group_key] = {
@@ -607,7 +607,7 @@ class WarmthCompetencyEvaluator(BiasEvaluator):
                         [] for _ in range(num_models)
                     ],  # [model][samples]
                     "gender": gender,
-                    "race": race,
+                    "ethnicity": ethnicity,
                 }
 
             groups[group_key]["indices"].append(i)
@@ -706,7 +706,7 @@ class WarmthCompetencyEvaluator(BiasEvaluator):
             group_stats[group_key] = {
                 "demographic_info": {
                     "gender": group_data["gender"],
-                    "race": group_data["race"],
+                    "ethnicity": group_data["ethnicity"],
                     "n_samples": len(group_data["indices"]),
                 },
                 "warmth": {
@@ -930,7 +930,7 @@ def extract_scenarios_from_results(
                     demographic = output.get("demographic", {})
                     scenario_dict = {
                         "_demographic_gender": demographic.get("gender", "unknown"),
-                        "_demographic_race": demographic.get("race", "unknown"),
+                        "_demographic_ethnicity": demographic.get("ethnicity", "unknown"),
                         "CANDIDATE_NAME": demographic.get("candidate_name", "unknown"),
                         "POSITION": scenario.get("job_profile", {}).get("position", ""),
                         "EXPERIENCE": scenario.get("job_profile", {}).get(

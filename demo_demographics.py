@@ -67,7 +67,7 @@ def analyze_results(result_files):
                     "total_scenarios": exp_info["total_scenarios"],
                     "methodology": exp_info["evaluation_methodology"]["description"],
                     "gender_dist": exp_info["demographic_distribution"]["gender"],
-                    "race_dist": exp_info["demographic_distribution"]["race"],
+                    "ethnicity_dist": exp_info["demographic_distribution"]["ethnicity"],
                 }
 
     # Display comparison table
@@ -89,7 +89,7 @@ def analyze_results(result_files):
     for group, data in results.items():
         print(f"\n{group}:")
         print(f"  Gender: {dict(data['gender_dist'])}")
-        print(f"  Race: {dict(data['race_dist'])}")
+        print(f"  Ethnicity: {dict(data['ethnicity_dist'])}")
 
 
 def main():

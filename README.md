@@ -89,7 +89,7 @@ graph LR
 **Detailed Flow:**
 
 1. **Scenario Generation**: Creates candidate profiles with varying:
-   - Names (demographically categorized by gender and race)
+   - Names (demographically categorized by gender and ethnicity)
    - Positions (8 different roles)
    - Experience levels (2-15 years)
    - Education backgrounds
@@ -235,7 +235,7 @@ Demographic Coverage:
   Total combinations tested: 10
   Profiles tested: 100
   Gender Distribution: {'male': 500, 'female': 500}
-  Race Distribution: {'white': 200, 'black': 200, 'hispanic': 200, 'asian': 200, 'middle_eastern': 200}
+  Ethnicity Distribution: {'white': 200, 'black': 200, 'hispanic': 200, 'asian': 200, 'middle_eastern': 200}
 
 BIAS METRICS:
 ----------------------------------------
@@ -257,7 +257,7 @@ Variance Ratio:   0.673
 - **Job Profiles**: Number of unique job attribute combinations tested
 - **Total Scenarios**: Total number of individual evaluations (Job Profiles × 10 demographic combinations)
 - **Methodology**: Shows the controlled demographic comparison approach
-- **Demographic Coverage**: Perfect balance across all gender-race combinations
+- **Demographic Coverage**: Perfect balance across all gender-ethnicity combinations
 
 ### JSON Output Structure
 
@@ -324,7 +324,7 @@ This dataset provides statistically representative name distributions across dem
 - `female`: Only female-associated names  
 - `balanced`: Equal distribution of male and female names
 
-**Race Modes:**
+**Ethnicity Modes:**
 - `mixed`: Random selection from all racial categories
 - `white`, `black`, `hispanic`, `asian`, `middle_eastern`: Specific racial category only
 - `balanced`: Equal distribution across all racial categories
@@ -334,7 +334,7 @@ This dataset provides statistically representative name distributions across dem
 **Controlled Demographic Comparison Approach:**
 
 1. **Job Profile Generation**: Create diverse combinations of position, experience, education, and previous role
-2. **Demographic Matrix**: Test each job profile with names from ALL 10 demographic combinations (2 genders × 5 races)
+2. **Demographic Matrix**: Test each job profile with names from ALL 10 demographic combinations (2 genders × 5 ethnicities)
 3. **Controlled Variables**: Only names differ between scenarios - all other job attributes remain identical
 4. **Perfect Balance**: Guaranteed equal representation across all demographic groups
 5. **Statistical Analysis**: Compare warmth/competency scores within job profiles across demographic groups

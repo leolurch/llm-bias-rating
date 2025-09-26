@@ -48,15 +48,15 @@ def create_bias_heatmap(results: Dict[str, Any], output_path: str = "bias_heatma
 
     # Extract data for heatmap
     genders = []
-    races = []
+    ethnicities = []
     warmth_scores = []
     competency_scores = []
     bias_gaps = []
 
     for group_name, group_data in demographic_groups.items():
-        gender, race = group_name.split('_', 1)
+        gender, ethnicity = group_name.split('_', 1)
         genders.append(gender)
-        races.append(race)
+        ethnicities.append(ethnicity)
         # Handle multi-model results
         if isinstance(group_data["warmth"]["mean"], list) and model_idx is not None:
             warmth_scores.append(group_data["warmth"]["mean"][model_idx])
@@ -73,19 +73,19 @@ def create_bias_heatmap(results: Dict[str, Any], output_path: str = "bias_heatma
 
     # Create matrices for heatmap
     unique_genders = sorted(list(set(genders)))
-    unique_races = sorted(list(set(races)))
+    unique_ethnicities = sorted(list(set(ethnicities)))
 
     # Initialize with NaN to handle missing combinations
-    warmth_matrix = np.full((len(unique_genders), len(unique_races)), np.nan)
-    competency_matrix = np.full((len(unique_genders), len(unique_races)), np.nan)
-    bias_matrix = np.full((len(unique_genders), len(unique_races)), np.nan)
+    warmth_matrix = np.full((len(unique_genders), len(unique_ethnicities)), np.nan)
+    competency_matrix = np.full((len(unique_genders), len(unique_ethnicities)), np.nan)
+    bias_matrix = np.full((len(unique_genders), len(unique_ethnicities)), np.nan)
 
-    for i, (gender, race, warmth, competency, bias) in enumerate(zip(genders, races, warmth_scores, competency_scores, bias_gaps)):
+    for i, (gender, ethnicity, warmth, competency, bias) in enumerate(zip(genders, ethnicities, warmth_scores, competency_scores, bias_gaps)):
         g_idx = unique_genders.index(gender)
-        r_idx = unique_races.index(race)
-        warmth_matrix[g_idx, r_idx] = warmth
-        competency_matrix[g_idx, r_idx] = competency
-        bias_matrix[g_idx, r_idx] = bias
+        e_idx = unique_ethnicities.index(ethnicity)
+        warmth_matrix[g_idx, e_idx] = warmth
+        competency_matrix[g_idx, e_idx] = competency
+        bias_matrix[g_idx, e_idx] = bias
 
     # Create subplot figure
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
@@ -93,31 +93,31 @@ def create_bias_heatmap(results: Dict[str, Any], output_path: str = "bias_heatma
     # Warmth heatmap
     sns.heatmap(warmth_matrix, annot=True, fmt='.3f', cmap='RdBu_r', center=0,
                 vmin=-1, vmax=1,
-                xticklabels=[r.replace('_', ' ').title() for r in unique_races],
+                xticklabels=[e.replace('_', ' ').title() for e in unique_ethnicities],
                 yticklabels=[g.title() for g in unique_genders],
                 ax=axes[0], cbar_kws={'label': 'Warmth Score (-1 to +1)'})
     axes[0].set_title('Warmth Scores by Demographics\n(-1.0 = Cold, +1.0 = Warm)')
-    axes[0].set_xlabel('Race/Ethnicity')
+    axes[0].set_xlabel('Ethnicity')
     axes[0].set_ylabel('Gender')
 
     # Competency heatmap
     sns.heatmap(competency_matrix, annot=True, fmt='.3f', cmap='RdBu_r', center=0,
                 vmin=-1, vmax=1,
-                xticklabels=[r.replace('_', ' ').title() for r in unique_races],
+                xticklabels=[e.replace('_', ' ').title() for e in unique_ethnicities],
                 yticklabels=[g.title() for g in unique_genders],
                 ax=axes[1], cbar_kws={'label': 'Competency Score (-1 to +1)'})
     axes[1].set_title('Competency Scores by Demographics\n(-1.0 = Incompetent, +1.0 = Competent)')
-    axes[1].set_xlabel('Race/Ethnicity')
+    axes[1].set_xlabel('Ethnicity')
     axes[1].set_ylabel('Gender')
 
     # Bias gap heatmap
     sns.heatmap(bias_matrix, annot=True, fmt='.3f', cmap='RdBu_r', center=0,
                 vmin=-2, vmax=2,  # Gap can range from -2 to +2
-                xticklabels=[r.replace('_', ' ').title() for r in unique_races],
+                xticklabels=[e.replace('_', ' ').title() for e in unique_ethnicities],
                 yticklabels=[g.title() for g in unique_genders],
                 ax=axes[2], cbar_kws={'label': 'Warmth - Competency Gap'})
     axes[2].set_title('Bias Gap by Demographics\n(Warmth - Competency)\nPositive = More Warm than Competent')
-    axes[2].set_xlabel('Race/Ethnicity')
+    axes[2].set_xlabel('Ethnicity')
     axes[2].set_ylabel('Gender')
 
     # Get model name for title
@@ -161,12 +161,12 @@ def create_scatter_plot(results: Dict[str, Any], output_path: str = "scatter_plo
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    # Color mapping by gender, shape by race
+    # Color mapping by gender, shape by ethnicity
     gender_colors = {'male': 'blue', 'female': 'red'}
-    race_markers = {'white': 'o', 'black': 's', 'hispanic': '^', 'asian': 'D', 'middle_eastern': 'v'}
+    ethnicity_markers = {'white': 'o', 'black': 's', 'hispanic': '^', 'asian': 'D', 'middle_eastern': 'v'}
 
     for group_name, group_data in demographic_groups.items():
-        gender, race = group_name.split('_', 1)
+        gender, ethnicity = group_name.split('_', 1)
 
         # Handle multi-model results
         if isinstance(group_data["warmth"]["mean"], list) and model_idx is not None and model_idx < len(group_data["warmth"]["mean"]):
@@ -184,17 +184,17 @@ def create_scatter_plot(results: Dict[str, Any], output_path: str = "scatter_plo
         sample_count = group_data.get("sample_count") or group_data.get("demographic_info", {}).get("n_samples", 1)
 
         color = gender_colors.get(gender, 'gray')
-        marker = race_markers.get(race, 'o')
+        marker = ethnicity_markers.get(ethnicity, 'o')
 
         # Plot with size proportional to sample count
         size = max(80, sample_count * 15)  # Slightly larger points for better visibility
         ax.scatter(warmth_mean, competency_mean,
                   s=size, c=color, marker=marker, alpha=0.7,
                   edgecolors='black', linewidth=0.5,
-                  label=f"{gender.title()} {race.replace('_', ' ').title()}")
+                  label=f"{gender.title()} {ethnicity.replace('_', ' ').title()}")
 
         # Add text labels
-        ax.annotate(f"{gender[0].upper()}{race[0].upper()}",
+        ax.annotate(f"{gender[0].upper()}{ethnicity[0].upper()}",
                    (warmth_mean, competency_mean),
                    xytext=(3, 3), textcoords='offset points',
                    fontsize=9, alpha=0.9, fontweight='bold')
@@ -243,12 +243,12 @@ def create_scatter_plot(results: Dict[str, Any], output_path: str = "scatter_plo
     # Create custom legend
     gender_handles = [plt.scatter([], [], c=color, s=100, label=gender.title())
                      for gender, color in gender_colors.items()]
-    race_handles = [plt.scatter([], [], c='gray', marker=marker, s=100, label=race.replace('_', ' ').title())
-                   for race, marker in race_markers.items()]
+    ethnicity_handles = [plt.scatter([], [], c='gray', marker=marker, s=100, label=ethnicity.replace('_', ' ').title())
+                         for ethnicity, marker in ethnicity_markers.items()]
 
     gender_legend = ax.legend(handles=gender_handles, title='Gender',
                              loc='upper left', bbox_to_anchor=(1.02, 1))
-    race_legend = ax.legend(handles=race_handles, title='Race/Ethnicity',
+    ethnicity_legend = ax.legend(handles=ethnicity_handles, title='Ethnicity',
                            loc='upper left', bbox_to_anchor=(1.02, 0.6))
     ax.add_artist(gender_legend)
 
@@ -287,14 +287,14 @@ def create_combined_scatter_plot(results: Dict[str, Any], output_path: str = "co
 
     # Color mapping by model, shape by demographic group
     model_colors = plt.cm.Set1(np.linspace(0, 1, num_models))
-    race_markers = {'white': 'o', 'black': 's', 'hispanic': '^', 'asian': 'D', 'middle_eastern': 'v'}
+    ethnicity_markers = {'white': 'o', 'black': 's', 'hispanic': '^', 'asian': 'D', 'middle_eastern': 'v'}
     gender_alpha = {'male': 1.0, 'female': 0.6, 'non-binary': 0.8}
 
     for model_idx in range(num_models):
         model_name = results["embedding_models"][model_idx].get("model_name", f"Model {model_idx}")
 
         for group_name, group_data in demographic_groups.items():
-            gender, race = group_name.split('_', 1)
+            gender, ethnicity = group_name.split('_', 1)
 
             # Handle array structure for multi-model data
             if isinstance(group_data["warmth"]["mean"], list) and model_idx < len(group_data["warmth"]["mean"]):
@@ -307,7 +307,7 @@ def create_combined_scatter_plot(results: Dict[str, Any], output_path: str = "co
             sample_count = group_data.get("sample_count") or group_data.get("demographic_info", {}).get("n_samples", 1)
 
             color = model_colors[model_idx]
-            marker = race_markers.get(race, 'o')
+            marker = ethnicity_markers.get(ethnicity, 'o')
             alpha = gender_alpha.get(gender, 0.7)
 
             # Plot with size proportional to sample count
@@ -315,7 +315,7 @@ def create_combined_scatter_plot(results: Dict[str, Any], output_path: str = "co
             ax.scatter(warmth_mean, competency_mean,
                       s=size, c=[color], marker=marker, alpha=alpha,
                       edgecolors='black', linewidth=0.5,
-                      label=f"{model_name} - {gender.title()} {race.replace('_', ' ').title()}" if model_idx == 0 else "")
+                      label=f"{model_name} - {gender.title()} {ethnicity.replace('_', ' ').title()}" if model_idx == 0 else "")
 
     # Add diagonal line and axis lines
     ax.plot([-1, 1], [-1, 1], 'k--', alpha=0.5, linewidth=1, label='Warmth = Competency')
@@ -346,12 +346,12 @@ def create_combined_scatter_plot(results: Dict[str, Any], output_path: str = "co
     # Create legends for models and demographics
     model_handles = [plt.scatter([], [], c=model_colors[i], s=100, label=results["embedding_models"][i].get("model_name", f"Model {i}"))
                     for i in range(num_models)]
-    race_handles = [plt.scatter([], [], c='gray', marker=marker, s=100, label=race.replace('_', ' ').title())
-                   for race, marker in race_markers.items()]
+    ethnicity_handles = [plt.scatter([], [], c='gray', marker=marker, s=100, label=ethnicity.replace('_', ' ').title())
+                         for ethnicity, marker in ethnicity_markers.items()]
 
     model_legend = ax.legend(handles=model_handles, title='Embedding Models',
                             loc='upper left', bbox_to_anchor=(1.02, 1))
-    race_legend = ax.legend(handles=race_handles, title='Race/Ethnicity',
+    ethnicity_legend = ax.legend(handles=ethnicity_handles, title='Ethnicity',
                            loc='upper left', bbox_to_anchor=(1.02, 0.6))
     ax.add_artist(model_legend)
 

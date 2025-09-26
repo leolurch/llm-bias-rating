@@ -1359,6 +1359,123 @@ class KoboldAIFairseq13BAdapter(LLMAdapter):
         logger.info("KoboldAI/fairseq-dense-13B model resources cleaned up")
 
 
+class GPTJT6BAdapter(LLMAdapter):
+    """Adapter for togethercomputer/GPT-JT-6B-v1 model (CUDA only)."""
+
+    def __init__(
+        self,
+        model_name: str = "togethercomputer/GPT-JT-6B-v1",
+        device: str = "auto",
+    ):
+        """
+        Initialize the GPT-JT-6B-v1 adapter.
+
+        Args:
+            model_name: HuggingFace model identifier
+            device: Device to load the model on ('auto' or 'cuda:0', 'cuda:1', etc.)
+        """
+        # Handle auto device selection - CUDA only
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda:0"
+                logger.info("Auto-selected cuda:0 for GPT-JT-6B adapter")
+            else:
+                raise ValueError("GPT-JT-6B adapter requires CUDA, but CUDA is not available. Please use a CUDA-enabled machine.")
+        elif not device.startswith('cuda'):
+            raise ValueError("GPT-JT-6B adapter only supports CUDA devices. Use 'cuda:0', 'cuda:1', etc.")
+            
+        self.model_name = model_name
+        self.device = device
+        logger.info(f"Loading GPT-JT-6B-v1 model on {self.device}")
+
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Set pad_token if not present
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        # Load model on CUDA
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                trust_remote_code=True,
+            )
+            self.model = self.model.to(device)
+            self.model.eval()
+            logger.info(f"GPT-JT-6B-v1 model loaded successfully on {self.device}")
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Failed to load GPT-JT-6B model: {e}")
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 3000,
+    ) -> str:
+        """
+        Generate text completion for the given prompt.
+
+        Args:
+            prompt: Input prompt string
+            max_new_tokens: Maximum number of new tokens to generate
+
+        Returns:
+            Generated text completion
+        """
+        try:
+            # Tokenize input
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+
+            # Generate with specified parameters
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
+
+            # Extract only the new tokens
+            input_length = inputs["input_ids"].shape[-1]
+            new_tokens = outputs[0][input_length:]
+            generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+            if not generated_text or generated_text.strip() == "":
+                logger.warning(
+                    f"GPT-JT-6B produced empty response for prompt: {prompt[:100]}..."
+                )
+                return "[Model produced empty response]"
+
+            return generated_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return f"Error: {str(e)}"
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return {
+            "model_name": self.model_name,
+            "model_type": "GPT-JT-6B-v1",
+            "parameters": "6B",
+            "context_length": 2048,
+            "device": self.device,
+            "architecture": "GPT-JT with instruction tuning",
+        }
+
+    def cleanup(self):
+        """Clean up model resources."""
+        if hasattr(self, "model"):
+            del self.model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("GPT-JT-6B model resources cleaned up")
+
+
 class DummyLLMAdapter(LLMAdapter):
     """Dummy LLM adapter for testing purposes."""
 

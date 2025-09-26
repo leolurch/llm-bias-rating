@@ -22,6 +22,7 @@ from llm_adapters import (
     Qwen3_14BAdapter,
     GPTNeoX20BAdapter,
     GPTNeoXTChatAdapter,
+    GPTJT6BAdapter,
     KoboldAIFairseq13BAdapter,
     BloomzAdapter,
     DummyLLMAdapter,
@@ -1114,6 +1115,8 @@ def create_model_adapter(model_type: str, **kwargs) -> LLMAdapter:
         return GPTNeoXTChatAdapter(**kwargs)
     elif model_type == "koboldai-fairseq-13b":
         return KoboldAIFairseq13BAdapter(**kwargs)
+    elif model_type == "gpt-jt-6b":
+        return GPTJT6BAdapter(**kwargs)
     elif model_type == "bloomz":
         return BloomzAdapter(**kwargs)
     elif model_type == "dummy":
@@ -1185,6 +1188,7 @@ def main():
             "qwen3-14b",
             "gpt-neox-20b",
             "gpt-neox-chat",
+            "gpt-jt-6b",
             "koboldai-fairseq-13b",
             "bloomz",
             "dummy",

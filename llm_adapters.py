@@ -553,6 +553,7 @@ class BloomzAdapter(LLMAdapter):
         max_new_tokens: int = 3000,
         retry_count=0,
         max_retries=3,
+        **kwargs,
     ) -> str:
         """
         Generate text completion for the given prompt.
@@ -1000,7 +1001,7 @@ class GPTNeoX20BAdapter(LLMAdapter):
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
-                    temperature=0.7,
+                    temperature=0.9,
                     do_sample=True,
                     top_p=0.9,
                     pad_token_id=self.tokenizer.eos_token_id,

@@ -1,8 +1,8 @@
 """
-LLM Bias Rating Evaluation Framework
+LLM Response Generation Framework
 
-This script evaluates Large Language Models for bias in hiring decisions
-by measuring warmth and competency dimensions in generated responses.
+This script generates responses from Large Language Models using hiring decision prompts
+and saves them to responses.json files for later evaluation.
 """
 
 import argparse
@@ -27,8 +27,6 @@ from llm_adapters import (
     BloomzAdapter,
     DummyLLMAdapter,
 )
-from evaluators import BiasEvaluator, WarmthCompetencyEvaluator, DummyEvaluator
-from embedding_adapters import create_embedding_adapter
 
 # Configure logging
 logging.basicConfig(
@@ -38,72 +36,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_evaluation_file(
-    results: Dict[str, Any], evaluator_type: str
-) -> Dict[str, Any]:
-    """
-    Create evaluation file with redundant response information.
-
-    Args:
-        results: Combined results from framework
-        evaluator_type: Type of evaluator used
-
-    Returns:
-        Dictionary formatted for evaluation file
-    """
-    evaluation_data = {
-        "metadata": {
-            "framework_version": results["metadata"]["framework_version"],
-            "timestamp": results["metadata"]["timestamp"],
-            "evaluator_type": evaluator_type,
-            "model_info": results["metadata"]["experiment_info"]["model_info"],
-            "evaluation_info": results["metadata"]["experiment_info"]["evaluator_info"],
-            "total_scenarios": results["metadata"]["experiment_info"][
-                "total_scenarios"
-            ],
-            "num_job_profiles": results["metadata"]["experiment_info"][
-                "num_job_profiles"
-            ],
-        },
-        "evaluations": [],
-        "aggregated_analysis": results.get("aggregated_analysis", {}),
-    }
-
-    # Extract each evaluation with full response copy
-    evaluation_id = 0
-    for scenario in results["scenarios"]:
-        for output in scenario["outputs"]:
-            for evaluation in output.get("evaluations", []):
-                eval_entry = {
-                    "evaluation_id": evaluation_id,
-                    "scenario_info": {
-                        "scenario_id": scenario["scenario_id"],
-                        "job_profile": scenario["job_profile"],
-                    },
-                    "demographic": output["demographic"],
-                    "response": output["response"],  # Full response copy
-                    "evaluation_results": evaluation,
-                    "timestamp": evaluation.get("timestamp", ""),
-                }
-                evaluation_data["evaluations"].append(eval_entry)
-                evaluation_id += 1
-
-    return evaluation_data
-
 
 class EvaluationFramework:
     """Main evaluation framework for LLM bias assessment."""
 
-    def __init__(self, model_adapter: LLMAdapter, evaluator: BiasEvaluator):
+    def __init__(self, model_adapter: LLMAdapter):
         """
-        Initialize the evaluation framework.
+        Initialize the response generation framework.
 
         Args:
             model_adapter: LLM adapter instance
-            evaluator: Bias evaluator instance
         """
         self.model_adapter = model_adapter
-        self.evaluator = evaluator
         self.results = {}
 
     def get_hr_prompt_template(self) -> str:
@@ -520,20 +464,16 @@ The candidate """
             }
             responses.append(response_obj)
 
-        # Evaluate responses if evaluator is available (pass scenarios for demographic analysis)
-        if self.evaluator is not None:
-            evaluation_results = self.evaluate_responses(response_texts, scenarios)
-        else:
-            # Create empty evaluation results for no-evaluation case
-            evaluation_results = {
-                "evaluator_info": {"type": "none"},
-                "n_samples": len(response_texts),
-                "warmth": {"mean": 0.0, "std": 0.0},
-                "competency": {"mean": 0.0, "std": 0.0},
-                "detailed_scores": [],
-                "bias_metrics": {"warmth_competency_correlation": 0.0},
-                "aggregated_analysis": {"overall_statistics": {}},
-            }
+        # Create empty evaluation results for generation-only mode
+        evaluation_results = {
+            "evaluator_info": {"type": "none"},
+            "n_samples": len(response_texts),
+            "warmth": {"mean": 0.0, "std": 0.0},
+            "competency": {"mean": 0.0, "std": 0.0},
+            "detailed_scores": [],
+            "bias_metrics": {"warmth_competency_correlation": 0.0},
+            "aggregated_analysis": {"overall_statistics": {}},
+        }
 
         # Group scenarios and responses by job profile for new schema
         scenarios_grouped = self._group_scenarios_by_profile(
@@ -565,11 +505,7 @@ The candidate """
                     "max_possible_job_profiles": max_possible_job_profiles,
                     "total_scenarios": len(scenarios),
                     "model_info": self.model_adapter.get_model_info(),
-                    "evaluator_info": (
-                        self.evaluator.get_metrics_info()
-                        if self.evaluator
-                        else {"type": "none"}
-                    ),
+                    "evaluator_info": {"type": "none"},
                     "total_time_seconds": total_time,
                 },
             },
@@ -577,7 +513,7 @@ The candidate """
             "aggregated_analysis": aggregated_analysis,
             "evaluation_methodology": {
                 "approach": "controlled_demographic_comparison",
-                "anchor_sentences": getattr(self.evaluator, "anchor_sentences", {}),
+                "anchor_sentences": {},
                 "demographic_combinations": total_demographic_combinations,
                 "job_profiles_requested": num_job_profiles,
                 "job_profiles_tested": actual_job_profiles,
@@ -585,7 +521,7 @@ The candidate """
             },
         }
 
-        logger.info(f"Evaluation completed in {total_time:.1f}s")
+        logger.info(f"Response generation completed in {total_time:.1f}s")
 
         return self.results
 
@@ -920,17 +856,16 @@ The candidate """
         return generation_scenarios
 
     def print_summary(self):
-        """Print a summary of the evaluation results."""
+        """Print a summary of the response generation results."""
         if not self.results:
-            logger.warning("No results to summarize. Run evaluation first.")
+            logger.warning("No results to summarize. Run generation first.")
             return
 
         metadata = self.results["metadata"]
         exp_info = metadata["experiment_info"]
-        overall_stats = self.results["aggregated_analysis"]["overall_statistics"]
 
         print("\n" + "=" * 60)
-        print("EVALUATION SUMMARY")
+        print("RESPONSE GENERATION SUMMARY")
         print("=" * 60)
         print(f"Model: {exp_info['model_info']['model_name']}")
         print(f"Job Profiles: {exp_info['num_job_profiles']}")
@@ -940,44 +875,19 @@ The candidate """
             f"Avg time per scenario: {exp_info['total_time_seconds']/exp_info['total_scenarios']:.2f}s"
         )
 
-        # Show evaluation methodology
+        # Show generation methodology
         if "evaluation_methodology" in self.results:
             method = self.results["evaluation_methodology"]
             print(f"\nMethodology: {method['approach']}")
             print(f"Demographic combinations: {method['demographic_combinations']}")
             print(f"Job profiles tested: {method['job_profiles_tested']}")
 
-        print("\nOVERALL STATISTICS:")
+        # Show basic generation statistics
+        total_responses = sum(len(scenario.get("outputs", [])) for scenario in self.results.get("scenarios", []))
+        print(f"\nRESPONSE STATISTICS:")
         print("-" * 40)
-        warmth_dist = overall_stats["warmth_distribution"]
-        comp_dist = overall_stats["competency_distribution"]
-
-        print(f"Warmth Score:     {warmth_dist['mean']:.3f} ± {warmth_dist['std']:.3f}")
-        print(f"Competency Score: {comp_dist['mean']:.3f} ± {comp_dist['std']:.3f}")
-        print(
-            f"Warmth Range:     [{warmth_dist['range'][0]:.3f}, {warmth_dist['range'][1]:.3f}]"
-        )
-        print(
-            f"Competency Range: [{comp_dist['range'][0]:.3f}, {comp_dist['range'][1]:.3f}]"
-        )
-
-        # Show demographic group summary
-        demographic_groups = self.results["aggregated_analysis"]["by_demographic_group"]
-        if demographic_groups:
-            print(f"\nDEMOGRAPHIC GROUPS: {len(demographic_groups)} groups analyzed")
-            print("-" * 40)
-            for group_name, group_data in list(demographic_groups.items())[
-                :5
-            ]:  # Show first 5
-                # Handle both single and multi-model formats for display
-                warmth_mean = group_data["warmth"]["mean"]
-                competency_mean = group_data["competency"]["mean"]
-
-                print(
-                    f"{group_name}: W={warmth_mean:.3f}, C={competency_mean:.3f} (n={group_data['sample_count']})"
-                )
-            if len(demographic_groups) > 5:
-                print(f"... and {len(demographic_groups) - 5} more groups")
+        print(f"Total responses generated: {total_responses}")
+        print(f"Scenarios with responses: {len(self.results.get('scenarios', []))}")
 
         print("\n" + "=" * 60)
 
@@ -1132,43 +1042,6 @@ def create_model_adapter(model_type: str, **kwargs) -> LLMAdapter:
         raise ValueError(f"Unknown model type: {model_type}")
 
 
-def create_evaluator(
-    evaluator_type: str, embedding_model: str = "openai", **kwargs
-) -> BiasEvaluator:
-    """
-    Create an evaluator instance.
-
-    Args:
-        evaluator_type: Type of evaluator to create
-        embedding_model: Name of embedding model to use
-        **kwargs: Additional arguments for the evaluator
-
-    Returns:
-        Bias evaluator instance
-    """
-    if evaluator_type == "warmth-competency":
-        # Create single embedding adapter
-        if embedding_model == "openai":
-            adapter = create_embedding_adapter(
-                "openai", model_name="text-embedding-3-small"
-            )
-        elif embedding_model == "qwen":
-            adapter = create_embedding_adapter("qwen")
-        elif embedding_model == "dummy":
-            adapter = create_embedding_adapter("dummy")
-        else:
-            logger.warning(
-                f"Unknown embedding model: {embedding_model}, defaulting to OpenAI"
-            )
-            adapter = create_embedding_adapter(
-                "openai", model_name="text-embedding-3-small"
-            )
-
-        return WarmthCompetencyEvaluator(embedding_adapter=adapter, **kwargs)
-    elif evaluator_type == "dummy":
-        return DummyEvaluator(**kwargs)
-    else:
-        raise ValueError(f"Unknown evaluator type: {evaluator_type}")
 
 
 def main():
@@ -1203,14 +1076,6 @@ def main():
         help="Type of model adapter to use",
     )
 
-    # Evaluator arguments
-    parser.add_argument(
-        "--evaluator-type",
-        type=str,
-        default="none",
-        choices=["warmth-competency", "dummy", "none"],
-        help="Type of evaluator to use ('none' skips evaluation)",
-    )
 
     # Experiment arguments
     parser.add_argument(
@@ -1274,8 +1139,8 @@ def main():
         logger.info(f"Creating {args.model_type} model adapter...")
         model_adapter = create_model_adapter(args.model_type, device="auto")
 
-        # Create evaluation framework (without evaluator for now)
-        framework = EvaluationFramework(model_adapter, None)
+        # Create response generation framework
+        framework = EvaluationFramework(model_adapter)
 
         logger.info("Generating responses...")
         framework.run_evaluation(
@@ -1289,20 +1154,6 @@ def main():
         responses_file = project_dir / "responses.json"
         framework.save_responses_only(responses_file)
         logger.info(f"Saved responses to {responses_file}")
-
-        # Run evaluation if not 'none'
-        if args.evaluator_type != "none":
-            logger.info(f"Creating {args.evaluator_type} evaluator...")
-            evaluator = create_evaluator(args.evaluator_type)
-            framework.evaluator = evaluator
-
-            # Run evaluation on generated responses
-            framework.evaluate_stored_responses()
-
-            # Save evaluation results
-            eval_file = project_dir / f"eval_{args.evaluator_type}_openai.json"
-            framework.save_evaluation_results(eval_file)
-            logger.info(f"Saved evaluation results to {eval_file}")
 
         framework.print_summary()
 

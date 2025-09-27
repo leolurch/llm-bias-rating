@@ -17,6 +17,14 @@ from embedding_adapters import (
     create_multiple_adapters,
 )
 
+# Import computational SCM functions
+import sys
+sys.path.append('computational-SCM')
+from test import compute_warmth_competence, rotate_data
+from train import get_embeddings, normalize
+import pandas as pd
+from sentence_transformers import SentenceTransformer
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +59,201 @@ class BiasEvaluator(ABC):
     def get_metrics_info(self) -> Dict[str, str]:
         """Return information about the metrics calculated by this evaluator."""
         pass
+
+
+class SCMWarmthCompetencyEvaluator(BiasEvaluator):
+    """
+    Evaluates text for warmth and competency using computational SCM approach.
+    Simple evaluator that uses pre-trained models and rotation matrices.
+    """
+
+    def __init__(self, model_name: str = "roberta-large-nli-mean-tokens"):
+        """
+        Initialize the SCM evaluator.
+
+        Args:
+            model_name: Name of the sentence transformer model to use
+        """
+        self.model_name = model_name
+        self.model = SentenceTransformer(model_name)
+        logger.info(f"Initialized SCM evaluator with model: {model_name}")
+
+    def get_metrics_info(self) -> Dict[str, Any]:
+        """Return information about the evaluator."""
+        return {
+            "type": "scm-warmth-competency",
+            "model_name": self.model_name,
+            "approach": "computational_scm"
+        }
+
+    def evaluate(self, texts: List[str], demographics: List[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Evaluate texts using computational SCM approach.
+
+        Args:
+            texts: List of generated text samples
+            demographics: Optional list of demographic metadata
+
+        Returns:
+            Dictionary containing evaluation results
+        """
+        if not texts:
+            return self._empty_results()
+
+        logger.info(f"Evaluating {len(texts)} texts using computational SCM...")
+
+        # Create DataFrame with sentences
+        df = pd.DataFrame({"Sentence": texts})
+
+        # Get embeddings
+        df = get_embeddings(df, self.model)
+
+        # Compute warmth and competence using SCM
+        df = compute_warmth_competence(
+            df, self.model_name, polar_model="axis_rotated", PLS=True, PCA=False
+        )
+
+        # Extract warmth and competency scores
+        warmth_scores = df["Warmth"].tolist()
+        competency_scores = df["Competence"].tolist()
+
+        # Create detailed scores
+        detailed_scores = []
+        for i, (text, warmth, competency) in enumerate(zip(texts, warmth_scores, competency_scores)):
+            score_obj = {
+                "index": i,
+                "text": text[:100] + "..." if len(text) > 100 else text,
+                "warmth": {
+                    "score": warmth,
+                    "orientation": "+" if warmth >= 0 else "-"
+                },
+                "competency": {
+                    "score": competency,
+                    "orientation": "+" if competency >= 0 else "-"
+                },
+                "proximities": {}  # Not applicable for SCM approach
+            }
+
+            # Add demographic info if available
+            if demographics and i < len(demographics):
+                demo = demographics[i]
+                score_obj["demographic"] = {
+                    "gender": demo.get("_demographic_gender", "unknown"),
+                    "ethnicity": demo.get("_demographic_ethnicity", "unknown"),
+                    "group": f"{demo.get('_demographic_gender', 'unknown')}_{demo.get('_demographic_ethnicity', 'unknown')}"
+                }
+
+            detailed_scores.append(score_obj)
+
+        # Calculate aggregate statistics
+        results = {
+            "n_samples": len(texts),
+            "evaluator_info": self.get_metrics_info(),
+            "warmth": {
+                "mean": float(np.mean(warmth_scores)),
+                "std": float(np.std(warmth_scores)),
+                "min": float(np.min(warmth_scores)),
+                "max": float(np.max(warmth_scores)),
+                "scores": warmth_scores
+            },
+            "competency": {
+                "mean": float(np.mean(competency_scores)),
+                "std": float(np.std(competency_scores)),
+                "min": float(np.min(competency_scores)),
+                "max": float(np.max(competency_scores)),
+                "scores": competency_scores
+            },
+            "detailed_scores": detailed_scores,
+            "bias_metrics": {
+                "warmth_competency_correlation": float(np.corrcoef(warmth_scores, competency_scores)[0, 1])
+            }
+        }
+
+        # Add demographic analysis if available
+        if demographics:
+            results["demographic_groups"] = self._analyze_by_demographic_groups(
+                detailed_scores, demographics
+            )
+            results["aggregated_analysis"] = self._create_aggregated_analysis(results)
+
+        logger.info("SCM evaluation completed")
+        return results
+
+    def _empty_results(self) -> Dict[str, Any]:
+        """Return empty results structure."""
+        return {
+            "n_samples": 0,
+            "evaluator_info": self.get_metrics_info(),
+            "warmth": {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "scores": []},
+            "competency": {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "scores": []},
+            "detailed_scores": [],
+            "bias_metrics": {"warmth_competency_correlation": 0.0}
+        }
+
+    def _analyze_by_demographic_groups(self, detailed_scores: List[Dict], demographics: List[Dict]) -> Dict[str, Any]:
+        """Analyze results by demographic groups."""
+        groups = {}
+
+        for score in detailed_scores:
+            if "demographic" in score:
+                group_key = score["demographic"]["group"]
+                if group_key not in groups:
+                    groups[group_key] = {
+                        "warmth_scores": [],
+                        "competency_scores": [],
+                        "demographic_info": {"n_samples": 0}
+                    }
+
+                groups[group_key]["warmth_scores"].append(score["warmth"]["score"])
+                groups[group_key]["competency_scores"].append(score["competency"]["score"])
+                groups[group_key]["demographic_info"]["n_samples"] += 1
+
+        # Calculate statistics for each group
+        for group_key, group_data in groups.items():
+            warmth_scores = group_data["warmth_scores"]
+            competency_scores = group_data["competency_scores"]
+
+            groups[group_key]["warmth"] = {
+                "mean": float(np.mean(warmth_scores)),
+                "std": float(np.std(warmth_scores)),
+                "min": float(np.min(warmth_scores)),
+                "max": float(np.max(warmth_scores)),
+                "scores": warmth_scores,
+                "orientation_counts": {"+": sum(1 for s in warmth_scores if s >= 0), "-": sum(1 for s in warmth_scores if s < 0)}
+            }
+
+            groups[group_key]["competency"] = {
+                "mean": float(np.mean(competency_scores)),
+                "std": float(np.std(competency_scores)),
+                "min": float(np.min(competency_scores)),
+                "max": float(np.max(competency_scores)),
+                "scores": competency_scores,
+                "orientation_counts": {"+": sum(1 for s in competency_scores if s >= 0), "-": sum(1 for s in competency_scores if s < 0)}
+            }
+
+            groups[group_key]["bias_metrics"] = {
+                "warmth_competency_gap": groups[group_key]["competency"]["mean"] - groups[group_key]["warmth"]["mean"]
+            }
+
+        return groups
+
+    def _create_aggregated_analysis(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """Create aggregated analysis section."""
+        return {
+            "overall_statistics": {
+                "total_evaluations": results["n_samples"],
+                "warmth_distribution": {
+                    "mean": results["warmth"]["mean"],
+                    "std": results["warmth"]["std"],
+                    "range": [results["warmth"]["min"], results["warmth"]["max"]]
+                },
+                "competency_distribution": {
+                    "mean": results["competency"]["mean"],
+                    "std": results["competency"]["std"],
+                    "range": [results["competency"]["min"], results["competency"]["max"]]
+                }
+            }
+        }
 
 
 class WarmthCompetencyEvaluator(BiasEvaluator):

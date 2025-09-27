@@ -98,7 +98,13 @@ class OpenAIAdapter(LLMAdapter):
         # Initialize OpenAI client
         self.client = OpenAI(api_key=api_key)
 
-    def generate(self, prompt: str, max_new_tokens: int = 3000) -> str:
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 3000,
+        retry_count: int = 0,
+        max_retries: int = 3,
+    ) -> str:
         """
         Generate text completion using OpenAI Chat Completions API.
 
@@ -108,15 +114,14 @@ class OpenAIAdapter(LLMAdapter):
         Returns:
             Generated text completion
         """
+
         try:
             # Use chat completions API with static parameters
             response = self.client.responses.create(
                 model=self.model_name,
-                reasoning={"effort": "low"},
+                reasoning={"effort": "minimal"},
                 max_output_tokens=max_new_tokens,
                 input=prompt,
-                temperature=1,
-                top_p=1,
             )
 
             # Extract content from response
@@ -135,7 +140,15 @@ class OpenAIAdapter(LLMAdapter):
                 result = None
             if result is None or result.strip() == "":
                 logger.warning(f"Model {self.model_name} produced empty response.")
-                return f"[Model produced empty response]"
+
+                if retry_count == max_retries:
+                    logger.error(f"Failed to generate response for prompt: {prompt}")
+                    return f"[Model produced empty response]"
+
+                sleep(1)  # Sleep for 20 seconds before returning
+                return self.generate(
+                    prompt, max_new_tokens, retry_count + 1, max_retries
+                )
 
             logger.info(f"OpenAI API call successful")
             return result.strip()
@@ -217,8 +230,8 @@ class GrokAdapter(LLMAdapter):
                 model=self.model_name,
                 temperature=0,
                 max_tokens=max_new_tokens
-                + len(
-                    prompt.split(" ") * 1.5
+                + int(
+                    len(prompt.split(" ")) * 1.3
                 ),  # rough estimate of the number of tokens in the prompt
             )
             chat.append(user(prompt))

@@ -815,7 +815,7 @@ class Qwen3_14BAdapter(LLMAdapter):
                 )
 
             # Extract only the new tokens
-            output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
+            output_ids = generated_ids[0][len(model_inputs["input_ids"][0]) :].tolist()
 
             if self.enable_thinking:
                 # Parse thinking content if in thinking mode

@@ -749,6 +749,8 @@ class Qwen3_14BAdapter(LLMAdapter):
         self,
         prompt: str,
         max_new_tokens: int = 3000,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
         **kwargs,
     ) -> str:
         """

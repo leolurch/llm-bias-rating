@@ -1,9 +1,12 @@
 venv/
 __pycache__/
-results/
 .env
 offload_cache/
 data
 .DS_Store
 backup
 computational-SCM
+embeddings
+.cursor
+.claude
+.ropeproject

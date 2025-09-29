@@ -8,6 +8,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import logging
 import os
+from time import sleep
 
 try:
     from openai import OpenAI

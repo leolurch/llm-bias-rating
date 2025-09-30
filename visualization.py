@@ -70,6 +70,192 @@ def get_demographic_groups(results: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def calculate_global_mean(all_results: List[Dict[str, Any]]) -> tuple:
+    """
+    Calculate the global mean warmth and competency across all models and demographic groups.
+
+    Args:
+        all_results: List of evaluation results from different projects
+
+    Returns:
+        Tuple of (global_warmth_mean, global_competency_mean)
+    """
+    all_warmth_scores = []
+    all_competency_scores = []
+
+    for results in all_results:
+        demographic_groups = get_demographic_groups(results)
+        if not demographic_groups:
+            continue
+
+        for group_name, group_data in demographic_groups.items():
+            # Extract scores (handle both single and multi-model formats)
+            if isinstance(group_data["warmth"]["median"], list):
+                warmth_median = group_data["warmth"]["median"][0]
+                competency_median = group_data["competency"]["median"][0]
+            else:
+                warmth_median = group_data["warmth"]["median"]
+                competency_median = group_data["competency"]["median"]
+
+            all_warmth_scores.append(warmth_median)
+            all_competency_scores.append(competency_median)
+
+    global_warmth_mean = np.mean(all_warmth_scores) if all_warmth_scores else 0.0
+    global_competency_mean = (
+        np.mean(all_competency_scores) if all_competency_scores else 0.0
+    )
+
+    return global_warmth_mean, global_competency_mean
+
+
+def create_single_model_zoomed_plot(
+    results: Dict[str, Any],
+    model_name: str,
+    output_path: str,
+):
+    """
+    Create a zoomed scatter plot for a single model centered on that model's own mean.
+
+    Args:
+        results: Evaluation results for the single model
+        model_name: Name of the model for the title
+        output_path: Path to save the plot
+    """
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # Ethnicity markers (same as main plot)
+    ethnicity_markers = {
+        "white": "o",
+        "black": "s",
+        "hispanic": "^",
+        "asian": "D",
+        "middle_eastern": "v",
+    }
+
+    # Gender visual distinction (same as main plot)
+    gender_patterns = {"male": None, "female": "///"}
+    gender_alpha = {"male": 0.8, "female": 0.6}
+
+    # Use a single color for this model (can use first color from colormap)
+    model_color = plt.cm.Set1(0.1)
+
+    demographic_groups = get_demographic_groups(results)
+    if not demographic_groups:
+        logger.warning(f"No demographic groups found for {model_name}")
+        return
+
+    # Calculate this model's mean warmth and competency
+    model_warmth_scores = []
+    model_competency_scores = []
+
+    for group_name, group_data in demographic_groups.items():
+        # Extract scores (handle both single and multi-model formats)
+        if isinstance(group_data["warmth"]["median"], list):
+            warmth_median = group_data["warmth"]["median"][0]
+            competency_median = group_data["competency"]["median"][0]
+        else:
+            warmth_median = group_data["warmth"]["median"]
+            competency_median = group_data["competency"]["median"]
+
+        model_warmth_scores.append(warmth_median)
+        model_competency_scores.append(competency_median)
+
+    model_warmth_mean = np.mean(model_warmth_scores) if model_warmth_scores else 0.0
+    model_competency_mean = (
+        np.mean(model_competency_scores) if model_competency_scores else 0.0
+    )
+
+    for group_name, group_data in demographic_groups.items():
+        gender, ethnicity = group_name.split("_", 1)
+
+        # Extract scores (handle both single and multi-model formats)
+        if isinstance(group_data["warmth"]["median"], list):
+            warmth_median = group_data["warmth"]["median"][0]
+            competency_median = group_data["competency"]["median"][0]
+        else:
+            warmth_median = group_data["warmth"]["median"]
+            competency_median = group_data["competency"]["median"]
+
+        # Visual styling (same as main plot)
+        marker = ethnicity_markers.get(ethnicity, "o")
+        alpha = gender_alpha.get(gender, 0.7)
+        hatch = gender_patterns.get(gender)
+        size = 120  # Slightly larger for zoomed view
+
+        # Plot point
+        ax.scatter(
+            warmth_median,
+            competency_median,
+            s=size,
+            color=model_color,
+            marker=marker,
+            alpha=alpha,
+            hatch=hatch,
+            edgecolors="black",
+            linewidth=0.5,
+        )
+
+    # Configure zoomed plot (0.075 x 0.075 area around this model's mean)
+    warmth_range = (model_warmth_mean - 0.0375, model_warmth_mean + 0.0375)
+    competency_range = (
+        model_competency_mean - 0.0375,
+        model_competency_mean + 0.0375,
+    )
+
+    ax.set_xlim(warmth_range)
+    ax.set_ylim(competency_range)
+    ax.set_xlabel("Warmth Score", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Competency Score", fontsize=12, fontweight="bold")
+    ax.set_title(f"{model_name} - Zoomed View", fontsize=14, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+
+    # Add reference lines at this model's mean (red dashed)
+    ax.axhline(
+        y=model_competency_mean,
+        color="red",
+        linestyle="--",
+        alpha=0.7,
+        linewidth=1.5,
+        label="Model Mean",
+    )
+    ax.axvline(
+        x=model_warmth_mean, color="red", linestyle="--", alpha=0.7, linewidth=1.5
+    )
+
+    # Add reference lines at origin
+    ax.axhline(y=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
+    ax.axvline(x=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
+
+    # Create ethnicity legend (no model legend for individual plots)
+    ethnicity_handles = [
+        plt.scatter(
+            [],
+            [],
+            color="gray",
+            marker=marker,
+            s=100,
+            label=ethnicity.replace("_", " ").title(),
+        )
+        for ethnicity, marker in ethnicity_markers.items()
+    ]
+    ethnicity_legend = ax.legend(
+        handles=ethnicity_handles,
+        title="Ethnicity",
+        loc="upper right",
+        fontsize=10,
+    )
+
+    plt.tight_layout()
+    plt.savefig(
+        output_path,
+        format="svg",
+        bbox_inches="tight",
+        pad_inches=0.2,
+    )
+    plt.close()  # Close the figure to free memory
+    logger.info(f"Zoomed plot for {model_name} saved to {output_path}")
+
+
 def create_multi_project_scatter_plot(
     all_results: List[Dict[str, Any]], output_path: str = "combined_scatter_plot.png"
 ):
@@ -290,7 +476,27 @@ def main():
         # Create combined plot
         create_multi_project_scatter_plot(all_results, args.output)
 
+        # Create individual zoomed plots for each model (centered on each model's own mean)
+        output_dir = output_path.parent
+        base_name = output_path.stem
+
+        for results in all_results:
+            project_name = results.get("_source_file", "unknown")
+            model_name = get_model_name(project_name).split("/")[-1]
+
+            # Create filename with model name
+            zoomed_filename = f"{base_name}_{model_name}_zoomed.svg"
+            zoomed_path = output_dir / zoomed_filename
+
+            # Generate individual zoomed plot (centered on this model's mean)
+            create_single_model_zoomed_plot(
+                results,
+                model_name,
+                str(zoomed_path),
+            )
+
         logger.info("Visualization complete!")
+        logger.info(f"Generated {len(all_results)} individual zoomed plots")
 
     except Exception as e:
         logger.error(f"Error creating visualizations: {e}")

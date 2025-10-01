@@ -70,6 +70,25 @@ def get_demographic_groups(results: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def get_demographic_colors() -> Dict[str, str]:
+    """
+    Get consistent color mapping for all demographic groups.
+
+    Returns:
+        Dictionary mapping demographic group names to hex color codes
+    """
+    return {
+        "female_asian": "#1f77b4",  # blue
+        "female_black": "#ff7f0e",  # orange
+        "female_hispanic": "#2ca02c",  # green
+        "female_white": "#d62728",  # red
+        "male_asian": "#8c564b",  # brown
+        "male_black": "#e377c2",  # pink
+        "male_hispanic": "#7f7f7f",  # gray
+        "male_white": "#bcbd22",  # olive
+    }
+
+
 def calculate_global_mean(all_results: List[Dict[str, Any]]) -> tuple:
     """
     Calculate the global mean warmth and competency across all models and demographic groups.
@@ -108,6 +127,112 @@ def calculate_global_mean(all_results: List[Dict[str, Any]]) -> tuple:
     return global_warmth_mean, global_competency_mean
 
 
+def create_single_model_all_points_plot(
+    results: Dict[str, Any],
+    model_name: str,
+    output_path: str,
+):
+    """
+    Create a zoomed out scatter plot for a single model showing all individual response evaluations.
+    Each response is plotted as a point with low alpha, colored by demographic group.
+
+    Args:
+        results: Evaluation results for the single model
+        model_name: Name of the model for the title
+        output_path: Path to save the plot
+    """
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Get consistent demographic colors
+    demographic_colors = get_demographic_colors()
+
+    demographic_groups = get_demographic_groups(results)
+    if not demographic_groups:
+        logger.warning(f"No demographic groups found for {model_name}")
+        return
+
+    # Track all points for calculating plot bounds
+    all_warmth_points = []
+    all_competency_points = []
+
+    # Plot all individual response points with low alpha
+    for group_name, group_data in demographic_groups.items():
+        color = demographic_colors.get(group_name, "#000000")  # fallback to black
+
+        # Get individual scores
+        warmth_scores = group_data.get("warmth_scores", [])
+        competency_scores = group_data.get("competency_scores", [])
+
+        # Skip if no individual scores available
+        if not warmth_scores or not competency_scores:
+            continue
+
+        # Ensure equal length arrays
+        min_length = min(len(warmth_scores), len(competency_scores))
+        warmth_scores = warmth_scores[:min_length]
+        competency_scores = competency_scores[:min_length]
+
+        # Plot all individual points for this demographic group
+        ax.scatter(
+            warmth_scores,
+            competency_scores,
+            s=20,  # small points
+            color=color,
+            alpha=0.3,  # low alpha for individual points
+            label=group_name.replace("_", " ").title(),
+            edgecolors="none",
+        )
+
+        # Collect points for bounds calculation
+        all_warmth_points.extend(warmth_scores)
+        all_competency_points.extend(competency_scores)
+
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+
+    # Add reference lines at origin
+    ax.axhline(y=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
+    ax.axvline(x=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
+
+    # Customize plot
+    ax.set_xlabel("Warmth Score", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Competency Score", fontsize=12, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+
+    # Create legend for demographic groups
+    handles = []
+    for group_name, color in demographic_colors.items():
+        if group_name in demographic_groups:  # only show groups that have data
+            handles.append(
+                plt.scatter(
+                    [],
+                    [],
+                    color=color,
+                    s=60,
+                    alpha=0.8,
+                    label=group_name.replace("_", " ").title(),
+                )
+            )
+
+    if handles:
+        legend = ax.legend(
+            handles=handles,
+            title="Demographic Groups",
+            loc="upper left",
+            fontsize=10,
+        )
+
+    plt.tight_layout()
+    plt.savefig(
+        output_path,
+        format="svg",
+        bbox_inches="tight",
+        pad_inches=0.2,
+    )
+    plt.close()  # Close the figure to free memory
+    logger.info(f"All-points plot for {model_name} saved to {output_path}")
+
+
 def create_single_model_zoomed_plot(
     results: Dict[str, Any],
     model_name: str,
@@ -123,28 +248,15 @@ def create_single_model_zoomed_plot(
     """
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    # Ethnicity markers (same as main plot)
-    ethnicity_markers = {
-        "white": "o",
-        "black": "s",
-        "hispanic": "^",
-        "asian": "D",
-        "middle_eastern": "v",
-    }
-
-    # Gender visual distinction (same as main plot)
-    gender_patterns = {"male": None, "female": "///"}
-    gender_alpha = {"male": 0.8, "female": 0.6}
-
-    # Use a single color for this model (can use first color from colormap)
-    model_color = plt.cm.Set1(0.1)
+    # Get consistent demographic colors
+    demographic_colors = get_demographic_colors()
 
     demographic_groups = get_demographic_groups(results)
     if not demographic_groups:
         logger.warning(f"No demographic groups found for {model_name}")
         return
 
-    # Calculate this model's mean warmth and competency
+    # Calculate this model's data points and ranges for dynamic zoom
     model_warmth_scores = []
     model_competency_scores = []
 
@@ -165,6 +277,34 @@ def create_single_model_zoomed_plot(
         np.mean(model_competency_scores) if model_competency_scores else 0.0
     )
 
+    # Calculate dynamic zoom range with 1.2x padding
+    if model_warmth_scores and model_competency_scores:
+        warmth_min, warmth_max = min(model_warmth_scores), max(model_warmth_scores)
+        competency_min, competency_max = min(model_competency_scores), max(
+            model_competency_scores
+        )
+
+        # Calculate ranges and apply 1.2x padding
+        warmth_range = warmth_max - warmth_min
+        competency_range = competency_max - competency_min
+
+        # Apply 1.2x padding (0.2 extra on each side = 1.2x total)
+        warmth_padding = warmth_range * 0.1
+        competency_padding = competency_range * 0.1
+
+        dynamic_warmth_range = (
+            warmth_min - warmth_padding,
+            warmth_max + warmth_padding,
+        )
+        dynamic_competency_range = (
+            competency_min - competency_padding,
+            competency_max + competency_padding,
+        )
+    else:
+        # Fallback if no data
+        dynamic_warmth_range = (-0.1, 0.1)
+        dynamic_competency_range = (-0.1, 0.1)
+
     for group_name, group_data in demographic_groups.items():
         gender, ethnicity = group_name.split("_", 1)
 
@@ -177,36 +317,24 @@ def create_single_model_zoomed_plot(
             competency_median = group_data["competency"]["median"]
 
         # Visual styling (same as main plot)
-        marker = ethnicity_markers.get(ethnicity, "o")
-        alpha = gender_alpha.get(gender, 0.7)
-        hatch = gender_patterns.get(gender)
         size = 120  # Slightly larger for zoomed view
+        color = demographic_colors.get(group_name, "#000000")  # fallback to black
 
         # Plot point
         ax.scatter(
             warmth_median,
             competency_median,
             s=size,
-            color=model_color,
-            marker=marker,
-            alpha=alpha,
-            hatch=hatch,
+            color=color,
             edgecolors="black",
             linewidth=0.5,
         )
 
-    # Configure zoomed plot (0.075 x 0.075 area around this model's mean)
-    warmth_range = (model_warmth_mean - 0.0375, model_warmth_mean + 0.0375)
-    competency_range = (
-        model_competency_mean - 0.0375,
-        model_competency_mean + 0.0375,
-    )
-
-    ax.set_xlim(warmth_range)
-    ax.set_ylim(competency_range)
+    # Configure dynamic zoomed plot based on actual data range with 1.2x padding
+    ax.set_xlim(dynamic_warmth_range)
+    ax.set_ylim(dynamic_competency_range)
     ax.set_xlabel("Warmth Score", fontsize=12, fontweight="bold")
     ax.set_ylabel("Competency Score", fontsize=12, fontweight="bold")
-    ax.set_title(f"{model_name} - Zoomed View", fontsize=14, fontweight="bold")
     ax.grid(True, alpha=0.3)
 
     # Add reference lines at this model's mean (red dashed)
@@ -226,24 +354,28 @@ def create_single_model_zoomed_plot(
     ax.axhline(y=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
     ax.axvline(x=0, color="k", linestyle="-", alpha=0.3, linewidth=0.8)
 
-    # Create ethnicity legend (no model legend for individual plots)
-    ethnicity_handles = [
-        plt.scatter(
-            [],
-            [],
-            color="gray",
-            marker=marker,
-            s=100,
-            label=ethnicity.replace("_", " ").title(),
+    # Create legend for demographic groups
+    handles = []
+    for group_name, color in demographic_colors.items():
+        if group_name in demographic_groups:  # only show groups that have data
+            handles.append(
+                plt.scatter(
+                    [],
+                    [],
+                    color=color,
+                    s=60,
+                    alpha=0.8,
+                    label=group_name.replace("_", " ").title(),
+                )
+            )
+
+    if handles:
+        legend = ax.legend(
+            handles=handles,
+            title="Demographic Groups",
+            loc="upper left",
+            fontsize=10,
         )
-        for ethnicity, marker in ethnicity_markers.items()
-    ]
-    ethnicity_legend = ax.legend(
-        handles=ethnicity_handles,
-        title="Ethnicity",
-        loc="upper right",
-        fontsize=10,
-    )
 
     plt.tight_layout()
     plt.savefig(
@@ -383,14 +515,7 @@ def create_multi_project_scatter_plot(
     #     fontweight="bold",
     # )
 
-    # Create legends
-    project_legend = ax.legend(
-        handles=file_handles,
-        title="Projects",
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1),
-    )
-
+    # Create legends positioned at top center of the plot
     ethnicity_handles = [
         plt.scatter(
             [],
@@ -405,18 +530,30 @@ def create_multi_project_scatter_plot(
     ethnicity_legend = ax.legend(
         handles=ethnicity_handles,
         title="Ethnicity",
-        loc="upper left",
-        bbox_to_anchor=(1.02, 0.6),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.0),
+        ncol=len(ethnicity_handles),
+        frameon=True,
+        framealpha=0.9,
     )
-    ax.add_artist(project_legend)
+
+    project_legend = ax.legend(
+        handles=file_handles,
+        title="Large Language Models (LLMs)",
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.93),
+        ncol=len(file_handles),
+        frameon=True,
+        framealpha=0.9,
+    )
+    ax.add_artist(ethnicity_legend)
 
     plt.tight_layout()
     plt.savefig(
         output_path,
         format="svg",
         bbox_inches="tight",
-        bbox_extra_artists=[project_legend, ethnicity_legend],
-        pad_inches=0.5,
+        pad_inches=0.2,
     )
     logger.info(f"Combined scatter plot saved to {output_path}")
     # plt.show()
@@ -495,8 +632,20 @@ def main():
                 str(zoomed_path),
             )
 
+            # Create filename for all-points plot
+            all_points_filename = f"{base_name}_{model_name}_all_points.svg"
+            all_points_path = output_dir / all_points_filename
+
+            # Generate individual all-points plot (showing all response evaluations)
+            create_single_model_all_points_plot(
+                results,
+                model_name,
+                str(all_points_path),
+            )
+
         logger.info("Visualization complete!")
         logger.info(f"Generated {len(all_results)} individual zoomed plots")
+        logger.info(f"Generated {len(all_results)} individual all-points plots")
 
     except Exception as e:
         logger.error(f"Error creating visualizations: {e}")

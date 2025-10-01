@@ -519,6 +519,36 @@ def extract_scenarios_from_results(
     return scenarios
 
 
+def extract_response_metadata_for_csv(
+    results_data: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Extract ordered response metadata for CSV export."""
+
+    metadata: List[Dict[str, Any]] = []
+
+    if "scenarios" in results_data and isinstance(results_data["scenarios"], list):
+        for scenario in results_data["scenarios"]:
+            scenario_id = scenario.get("scenario_id")
+            for output in scenario.get("outputs", []):
+                response_text = output.get("response", "")
+                if not response_text:
+                    continue
+
+                demographic = output.get("demographic", {})
+                metadata.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "output_id": output.get("output_id"),
+                        "gender": demographic.get("gender"),
+                        "ethnicity": demographic.get("ethnicity"),
+                        "candidate_name": demographic.get("candidate_name"),
+                    }
+                )
+
+    logger.info(f"Extracted {len(metadata)} metadata rows for CSV export")
+    return metadata
+
+
 def save_extended_results(
     original_data: Dict[str, Any],
     evaluation_results: Dict[str, Any],
@@ -640,6 +670,76 @@ def evaluate_single_project(project_name: str, evaluator_type: str) -> int:
             json.dump(eval_data, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Evaluation results saved to {eval_file}")
+
+        # Export per-response scores for downstream analysis (CSV addition only)
+        if evaluator_type == "scm":
+            response_metadata = extract_response_metadata_for_csv(results_data)
+            warmth_scores = evaluation_results.get("warmth", {}).get("scores", [])
+            competency_scores = evaluation_results.get("competency", {}).get(
+                "scores", []
+            )
+
+            total_responses = len(response_texts)
+            csv_rows: List[Dict[str, Any]] = []
+
+            if not warmth_scores or not competency_scores:
+                logger.warning(
+                    "Skipping CSV export because warmth or competency scores are missing."
+                )
+            elif (
+                len(warmth_scores) != total_responses
+                or len(competency_scores) != total_responses
+                or len(response_metadata) != total_responses
+            ):
+                logger.warning(
+                    "Skipping CSV export due to mismatched score lengths: "
+                    f"responses={total_responses}, warmth={len(warmth_scores)}, "
+                    f"competency={len(competency_scores)}, metadata={len(response_metadata)}"
+                )
+            else:
+                for idx in range(total_responses):
+                    meta = response_metadata[idx] if idx < len(response_metadata) else {}
+                    response_text = response_texts[idx] or ""
+
+                    csv_rows.append(
+                        {
+                            "scenario_id": meta.get("scenario_id")
+                            if meta.get("scenario_id") is not None
+                            else idx,
+                            "output_id": meta.get("output_id")
+                            if meta.get("output_id") is not None
+                            else idx,
+                            "gender": meta.get("gender") or "unknown",
+                            "ethnicity": meta.get("ethnicity") or "unknown",
+                            "candidate_name": meta.get("candidate_name")
+                            or "unknown",
+                            "warmth_score": float(warmth_scores[idx]),
+                            "competency_score": float(competency_scores[idx]),
+                            "response_truncated[:50]": response_text.replace(
+                                "\n", " "
+                            )[:50],
+                        }
+                    )
+
+                if csv_rows:
+                    csv_file = project_dir / "eval_scm.csv"
+                    pd.DataFrame(csv_rows)[
+                        [
+                            "scenario_id",
+                            "output_id",
+                            "gender",
+                            "ethnicity",
+                            "candidate_name",
+                            "warmth_score",
+                            "competency_score",
+                            "response_truncated[:50]",
+                        ]
+                    ].to_csv(csv_file, index=False)
+                    logger.info(f"Evaluation CSV saved to {csv_file}")
+                else:
+                    logger.warning(
+                        "No rows generated for CSV export; skipping CSV file creation."
+                    )
 
         # Print summary
         print(f"\n📊 EVALUATION SUMMARY")

@@ -373,11 +373,9 @@ WARMTH_COLUMNS: List[Tuple[str, str]] = [
     ("$p_{BH}$ Warmth Ethnicity", "warmth_ethnicity_p"),
     ("$W$ Warmth Ethnicity", "warmth_ethnicity_w"),
     ("$n$ Warmth Ethnicity", "warmth_ethnicity_n"),
-    ("Order Warmth Ethnicity", "warmth_ethnicity_order"),
     ("$p_{BH}$ Warmth Demo", "warmth_demo_p"),
     ("$W$ Warmth Demo", "warmth_demo_w"),
     ("$n$ Warmth Demo", "warmth_demo_n"),
-    ("Order Warmth Demo", "warmth_demo_order"),
 ]
 
 COMPETENCY_COLUMNS: List[Tuple[str, str]] = [
@@ -390,11 +388,9 @@ COMPETENCY_COLUMNS: List[Tuple[str, str]] = [
     ("$p_{BH}$ Competency Ethnicity", "competency_ethnicity_p"),
     ("$W$ Competency Ethnicity", "competency_ethnicity_w"),
     ("$n$ Competency Ethnicity", "competency_ethnicity_n"),
-    ("Order Competency Ethnicity", "competency_ethnicity_order"),
     ("$p_{BH}$ Competency Demo", "competency_demo_p"),
     ("$W$ Competency Demo", "competency_demo_w"),
     ("$n$ Competency Demo", "competency_demo_n"),
-    ("Order Competency Demo", "competency_demo_order"),
 ]
 
 
@@ -463,9 +459,23 @@ def main(argv: List[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Failed to analyze project '{project}': {exc}") from exc
 
+    print("Warmth Ordering")
+    for stats in aggregated_stats:
+        print(
+            f"{stats['Model']}: Ethnicity {format_number(stats['warmth_ethnicity_order'])}, "
+            f"Demo {format_number(stats['warmth_demo_order'])}"
+        )
+
     print("Warmth Metrics")
     for line in build_cli_table(aggregated_stats, WARMTH_COLUMNS):
         print(line)
+
+    print("\nCompetency Ordering")
+    for stats in aggregated_stats:
+        print(
+            f"{stats['Model']}: Ethnicity {format_number(stats['competency_ethnicity_order'])}, "
+            f"Demo {format_number(stats['competency_demo_order'])}"
+        )
 
     print("\nCompetency Metrics")
     for line in build_cli_table(aggregated_stats, COMPETENCY_COLUMNS):
